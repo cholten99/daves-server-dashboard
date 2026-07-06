@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backup {{ run_id }} — HD1 contents</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
+    h2 { font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin: 0 0 .5rem; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; }
+    section { margin-bottom: 2rem; background: #272727; border-radius: 6px; padding: 1rem 1.25rem; }
+    .dest { color: #999; font-size: .8rem; margin-bottom: .5rem; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; }
+    .badge-ok   { background: #1a3a1a; color: #6d6; }
+    .badge.fail { background: #3a1a1a; color: #e55; }
+    .badge-warning { background: #2a2a1a; color: #ca6; }
+    pre.filelist {
+      max-height: 420px; overflow-y: auto; background: #1a1a1a; border-radius: 4px;
+      padding: .75rem 1rem; font-size: .82rem; line-height: 1.5; color: #bbb;
+      white-space: pre-wrap; word-break: break-all;
+    }
+    .empty { color: #999; font-size: .9rem; }
+    a.back { color: #69c; text-decoration: none; font-size: .85rem; }
+    a.back:hover { color: #9cf; }
+  </style>
+</head>
+<body>
+  {% if not_found %}
+  <h1>Backup {{ run_id }}</h1>
+  <p class="sub">This run's log is no longer available — it's past the 30-day retention window and has been rotated out.</p>
+  {% else %}
+  <h1>Backup HD1 contents — {{ started_at[:16] | replace('T', ' ') }}{% if dry_run %} <span class="badge badge-warning">Dry run</span>{% endif %}</h1>
+  <p class="sub">Files rsync'd to /mnt/portable1 in this run ({{ run_id }})</p>
+
+  {% if actions %}
+    {% for a in actions %}
+    <section>
+      <h2>{{ a.name }}
+        {% if a.status == 'failed' %}<span class="badge fail">failed</span>
+        {% elif a.status == 'warning' %}<span class="badge badge-warning">warning</span>
+        {% else %}<span class="badge badge-ok">{{ a.file_count }} file{{ 's' if a.file_count != 1 else '' }}</span>{% endif %}
+      </h2>
+      <div class="dest">&rarr; {{ a.destination }}</div>
+      {% if a.files %}
+      <pre class="filelist">{% for f in a.files %}{{ f }}
+{% endfor %}</pre>
+      {% else %}
+      <p class="empty">No files transferred (nothing changed since last run).</p>
+      {% endif %}
+    </section>
+    {% endfor %}
+  {% else %}
+  <p class="empty">No actions in this run wrote to HD1 (/mnt/portable1).</p>
+  {% endif %}
+  {% endif %}
+
+  <a class="back" href="javascript:window.close()">Close this tab</a>
+</body>
+</html>

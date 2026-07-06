@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dave's Server — Login</title>
+  <style>
+    body { font-family: sans-serif; background: #1a1a1a; color: #eee; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .box { background: #2a2a2a; padding: 2rem 2.5rem; border-radius: 8px; width: 300px; }
+    h1 { font-size: 1.2rem; margin: 0 0 1.5rem; color: #fff; }
+    input[type=password] { width: 100%; padding: 0.5rem; font-size: 1rem; background: #333; border: 1px solid #555; color: #eee; border-radius: 4px; box-sizing: border-box; }
+    button { margin-top: 1rem; width: 100%; padding: 0.6rem; background: #4a90e2; border: none; color: #fff; font-size: 1rem; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #357abd; }
+    .error { color: #e25555; margin-top: 0.8rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Dave's Server Dashboard</h1>
+    <form method="post">
+      <input type="password" name="password" placeholder="Password" autofocus>
+      <button type="submit">Enter</button>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    </form>
+  </div>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dave's Server Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.3rem; color: #eee; margin-bottom: 1.5rem; }
+    h2 { font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .75rem; }
+    section { margin-bottom: 2.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; background: #272727; border-radius: 6px; overflow: hidden; }
+    th { text-align: left; color: #ddd; font-weight: 500; padding: .5rem .75rem; border-bottom: 1px solid #333; background: #242424; }
+    td { padding: .5rem .75rem; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; }
+    .badge-ok       { background: #1a3a1a; color: #6d6; }
+    .badge-off      { background: #3a2a14; color: #c80; }
+    .badge-active   { background: #1a2a3e; color: #69c; }
+    .badge-syncing  { background: #2a2a1a; color: #ca6; }
+    .badge-medium   { background: #2a2a1a; color: #ca6; }
+    .badge-high     { background: #3a2414; color: #e08a3c; }
+    .badge-critical,.badge.fail { background: #3a1a1a; color: #e55; }
+    .badge-warning  { background: #2a2a1a; color: #ca6; }
+    .dim   { color: #ddd; font-size: .85rem; }
+    .file  { color: #ddd; }
+    .saved { color: #6d6; font-weight: 500; }
+    .nav { float: right; font-size: .85rem; display: flex; align-items: center; gap: 1rem; }
+    .nav a { color: #ddd; text-decoration: none; }
+    .nav a:hover { color: #fff; }
+    .pulse { width: 7px; height: 7px; border-radius: 50%; background: #555; display: inline-block; }
+    .pulse.live { background: #6d6; animation: blink 2s infinite; }
+    @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+    .empty { color: #ddd; font-size: .9rem; padding: .5rem 0; }
+    .issue-list { list-style: none; font-size: .85rem; }
+    .issue-list li { padding: .15rem 0; }
+    .total-box {
+      background: #272727; border-radius: 6px; padding: .75rem 1rem;
+      display: inline-block; font-size: 1.1rem; font-weight: 600; color: #6d6;
+    }
+    .total-box span { color: #ddd; font-size: .85rem; font-weight: 400; margin-left: .4rem; }
+  </style>
+</head>
+<body>
+  <h1>Dave's Server
+    <span class="nav">
+      <span class="pulse" id="pulse" title="Live updates"></span>
+      <a href="/logout">Log out</a>
+    </span>
+  </h1>
+
+  <!-- ── Security audit ── -->
+  <section>
+    <h2>Security audit (last {{ security|length }} run{{ 's' if security|length != 1 else '' }})</h2>
+    <div id="security-content">
+      {% if security %}
+      <table>
+        <tr><th>Run</th><th>Status</th><th>Findings</th></tr>
+        {% for run in security %}
+        <tr>
+          <td class="dim"><a href="/security/{{ run.when | urlencode }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.when }}</a></td>
+          <td>
+            {% if not run.issues %}
+              <span class="badge badge-ok">Clean</span>
+            {% elif run.max_severity == 'CRITICAL' %}
+              <span class="badge badge-critical">Critical</span>
+            {% elif run.max_severity == 'HIGH' %}
+              <span class="badge badge-high">High</span>
+            {% else %}
+              <span class="badge badge-medium">Medium</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.issues %}
+            <span class="dim">{{ run.issues|length }} finding{{ 's' if run.issues|length != 1 else '' }}</span>
+            {% else %}
+            <span class="dim">No issues found.</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No audit runs found in this window.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- ── Backups ── -->
+  <section>
+    <h2>Backups (last {{ backups|length }} run{{ 's' if backups|length != 1 else '' }})</h2>
+    <div id="backups-content">
+      {% if backups %}
+      <table>
+        <tr><th>Run</th><th>Status</th><th>Duration</th><th>Actions</th><th>Issues</th></tr>
+        {% for run in backups %}
+        <tr>
+          <td class="dim"><a href="/backup/{{ run.run_id }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.started_at[:16] | replace('T', ' ') }}</a></td>
+          <td>
+            {% if run.run_type == 'dry_run' %}<span class="badge badge-warning">Dry run</span>
+            {% elif run.run_type == 'test' %}<span class="badge badge-active">Test run</span>
+            {% endif %}
+          </td>
+          <td class="dim">{{ run.duration_display }}</td>
+          <td class="dim">{{ run.success }}/{{ run.total }}</td>
+          <td>
+            {% if run.failed %}<span class="badge fail" title="{{ run.failed_names|join(', ') }}">{{ run.failed }} failed</span>{% endif %}
+            {% if run.warning %}<span class="badge badge-warning" title="{{ run.warning_names|join(', ') }}">{{ run.warning }} warning</span>{% endif %}
+            {% if not run.failed and not run.warning %}<span class="badge badge-ok">OK</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No backup runs found in this window.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- ── Media Resize ── -->
+  <section>
+    <h2><a href="https://media-resize.bowsy.co.uk" target="_blank" style="color:inherit;text-decoration:none">Media Resize</a></h2>
+    <div id="mr-content">
+      {% if media_resize.reachable %}
+      <table id="mr-workers-table">
+        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Since</th></tr>
+        {% for w in media_resize.workers %}
+        <tr>
+          <td><strong>{{ w.display }}</strong></td>
+          <td>
+            {% if not w.enabled %}<span class="badge badge-off">Disabled</span>
+            {% elif w.busy %}<span class="badge badge-active">{{ w.current_status }}</span>
+            {% else %}<span class="badge badge-ok">Idle</span>{% endif %}
+          </td>
+          <td class="file">{{ w.current_file or '—' }}</td>
+          <td class="dim">{{ timeago(w.started_at) if w.busy else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+
+      <div class="total-box" style="margin-top:1rem">
+        <span id="mr-saved-gb">{{ media_resize.saved_gb }}</span> GB
+        <span>saved across <span id="mr-done-count">{{ media_resize.done_count }}</span> files
+        &middot; <span id="mr-queue-count">{{ media_resize.queue_count }}</span> queued
+        &middot; <span id="mr-failed-count">{{ media_resize.failed_count }}</span> failed</span>
+      </div>
+      {% else %}
+      <p class="empty">Could not read media-resize state.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- ── Other Jobs ── -->
+  <section>
+    <h2>Other Jobs</h2>
+    <div id="jobs-content">
+      <table>
+        <tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
+        {% for j in other_jobs %}
+        <tr>
+          <td><strong>{{ j.name }}</strong></td>
+          <td class="dim">{{ j.schedule }}</td>
+          <td class="dim">{{ timeago(j.last_run) if j.last_run else '—' }}</td>
+          <td>
+            {% if j.status == 'ok' %}<span class="badge badge-ok" title="{{ j.message }}">OK</span>
+            {% elif j.status == 'warning' %}<span class="badge badge-warning" title="{{ j.message }}">{{ j.message }}</span>
+            {% elif j.status == 'fail' %}<span class="badge fail" title="{{ j.message }}">Failed</span>
+            {% else %}<span class="badge badge-off" title="{{ j.message }}">Unknown</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+<script>
+function tableHtml(headers, rows) {
+  const head = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+  const body = rows.map(r => `<tr>${r}</tr>`).join('');
+  return `<table>${head}${body}</table>`;
+}
+function severityBadge(sev, hasIssues) {
+  if (!hasIssues) return '<span class="badge badge-ok">Clean</span>';
+  if (sev === 'CRITICAL') return '<span class="badge badge-critical">Critical</span>';
+  if (sev === 'HIGH') return '<span class="badge badge-high">High</span>';
+  return '<span class="badge badge-medium">Medium</span>';
+}
+function updateSecurity(security) {
+  const el = document.getElementById('security-content');
+  if (!security.length) { el.innerHTML = '<p class="empty">No audit runs found in this window.</p>'; return; }
+  const rows = security.map(run => {
+    const findings = run.issues.length
+      ? `<span class="dim">${run.issues.length} finding${run.issues.length !== 1 ? 's' : ''}</span>`
+      : '<span class="dim">No issues found.</span>';
+    const link = `<a href="/security/${encodeURIComponent(run.when)}" target="_blank" style="color:#9cf;text-decoration:none">${run.when}</a>`;
+    return `<td class="dim">${link}</td><td>${severityBadge(run.max_severity, run.issues.length > 0)}</td><td>${findings}</td>`;
+  });
+  el.innerHTML = tableHtml(['Run', 'Status', 'Findings'], rows);
+}
+function updateBackups(backups) {
+  const el = document.getElementById('backups-content');
+  if (!backups.length) { el.innerHTML = '<p class="empty">No backup runs found in this window.</p>'; return; }
+  const rows = backups.map(run => {
+    const dur = run.duration_display;
+    let issues = '';
+    if (run.failed) issues += `<span class="badge fail" title="${run.failed_names.join(', ')}">${run.failed} failed</span>`;
+    if (run.warning) issues += `<span class="badge badge-warning" title="${run.warning_names.join(', ')}">${run.warning} warning</span>`;
+    if (!run.failed && !run.warning) issues = '<span class="badge badge-ok">OK</span>';
+    const label = run.started_at.slice(0, 16).replace('T', ' ');
+    const link = `<a href="/backup/${run.run_id}" target="_blank" style="color:#9cf;text-decoration:none">${label}</a>`;
+    const status = run.run_type === 'dry_run' ? '<span class="badge badge-warning">Dry run</span>'
+      : run.run_type === 'test' ? '<span class="badge badge-active">Test run</span>'
+      : '';
+    return `<td class="dim">${link}</td><td>${status}</td><td class="dim">${dur}</td><td class="dim">${run.success}/${run.total}</td><td>${issues}</td>`;
+  });
+  el.innerHTML = tableHtml(['Run', 'Status', 'Duration', 'Actions', 'Issues'], rows);
+}
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
+  return m ? `${h}h ${m}m ago` : `${h}h ago`;
+}
+function updateMediaResize(mr) {
+  const el = document.getElementById('mr-content');
+  if (!mr.reachable) { el.innerHTML = '<p class="empty">Could not read media-resize state.</p>'; return; }
+  const workerRows = mr.workers.map(w => {
+    const status = !w.enabled ? '<span class="badge badge-off">Disabled</span>'
+      : w.busy ? `<span class="badge badge-active">${w.current_status}</span>`
+      : '<span class="badge badge-ok">Idle</span>';
+    const since = w.busy ? timeAgo(w.started_at) : '—';
+    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${since}</td>`;
+  });
+  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Since'], workerRows)
+    + `<div class="total-box" style="margin-top:1rem"><span>${mr.saved_gb}</span> GB
+       <span>saved across ${mr.done_count} files &middot; ${mr.queue_count} queued &middot; ${mr.failed_count} failed</span></div>`;
+}
+function updateJobs(jobs) {
+  const el = document.getElementById('jobs-content');
+  const rows = jobs.map(j => {
+    const since = j.last_run ? timeAgo(j.last_run) : '—';
+    const status = j.status === 'ok' ? `<span class="badge badge-ok" title="${j.message}">OK</span>`
+      : j.status === 'warning' ? `<span class="badge badge-warning" title="${j.message}">${j.message}</span>`
+      : j.status === 'fail' ? `<span class="badge fail" title="${j.message}">Failed</span>`
+      : `<span class="badge badge-off" title="${j.message}">Unknown</span>`;
+    return `<td><strong>${j.name}</strong></td><td class="dim">${j.schedule}</td><td class="dim">${since}</td><td>${status}</td>`;
+  });
+  el.innerHTML = tableHtml(['Job', 'Schedule', 'Last run', 'Status'], rows);
+}
+function poll() {
+  fetch('/api/data')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      updateSecurity(data.security);
+      updateBackups(data.backups);
+      updateMediaResize(data.media_resize);
+      updateJobs(data.other_jobs);
+      document.getElementById('pulse').classList.add('live');
+    })
+    .catch(() => {
+      document.getElementById('pulse').classList.remove('live');
+    });
+}
+setInterval(poll, 20000);
+document.getElementById('pulse').classList.add('live');
+</script>
+</body>
+</html>

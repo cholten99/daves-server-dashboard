@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security audit — {{ when }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; background: #272727; border-radius: 6px; overflow: hidden; }
+    th { text-align: left; color: #ddd; font-weight: 500; padding: .5rem .75rem; border-bottom: 1px solid #333; background: #242424; }
+    td { padding: .5rem .75rem; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; }
+    .badge-medium   { background: #2a2a1a; color: #ca6; }
+    .badge-high     { background: #3a2414; color: #e08a3c; }
+    .badge-critical { background: #3a1a1a; color: #e55; }
+    .empty { color: #999; font-size: .9rem; }
+    a.back { color: #69c; text-decoration: none; font-size: .85rem; }
+    a.back:hover { color: #9cf; }
+  </style>
+</head>
+<body>
+  {% if not_found %}
+  <h1>Security audit — {{ when }}</h1>
+  <p class="sub">This run's findings are no longer available — past the retention window covered by this dashboard.</p>
+  {% else %}
+  <h1>Security audit — {{ when }}</h1>
+  <p class="sub">All findings from this run (uncollapsed)</p>
+
+  {% if issues %}
+  <table>
+    <tr><th>Severity</th><th>Machine</th><th>Message</th></tr>
+    {% for i in issues %}
+    <tr>
+      <td>
+        {% if i.severity == 'CRITICAL' %}<span class="badge badge-critical">Critical</span>
+        {% elif i.severity == 'HIGH' %}<span class="badge badge-high">High</span>
+        {% else %}<span class="badge badge-medium">{{ i.severity|title }}</span>{% endif %}
+      </td>
+      <td><strong>{{ i.machine }}</strong></td>
+      <td>{{ i.message }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="empty">No issues found in this run.</p>
+  {% endif %}
+  {% endif %}
+
+  <p style="margin-top:1.5rem"><a class="back" href="javascript:window.close()">Close this tab</a></p>
+</body>
+</html>
