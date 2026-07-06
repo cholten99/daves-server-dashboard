@@ -33,6 +33,7 @@
     .pulse.live { background: #6d6; animation: blink 2s infinite; }
     @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.3 } }
     .empty { color: #ddd; font-size: .9rem; padding: .5rem 0; }
+    .stale-warn { color: #ca6; font-size: .8rem; margin-left: .35rem; cursor: help; }
     .issue-list { list-style: none; font-size: .85rem; }
     .issue-list li { padding: .15rem 0; }
     .total-box {
@@ -124,7 +125,7 @@
     <div id="mr-content">
       {% if media_resize.reachable %}
       <table id="mr-workers-table">
-        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Since</th></tr>
+        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Progress</th><th>ETA</th><th>Since</th></tr>
         {% for w in media_resize.workers %}
         <tr>
           <td><strong>{{ w.display }}</strong></td>
@@ -134,6 +135,11 @@
             {% else %}<span class="badge badge-ok">Idle</span>{% endif %}
           </td>
           <td class="file">{{ w.current_file or '—' }}</td>
+          <td class="dim">
+            {% if w.pct is not none %}{% if w.estimated %}~{% endif %}{{ w.pct }}%{% if w.stale_s %}<span class="stale-warn" title="No live connection to the worker recently — showing last known progress">⚠</span>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="dim">{{ w.eta_display or '—' }}</td>
           <td class="dim">{{ timeago(w.started_at) if w.busy else '—' }}</td>
         </tr>
         {% endfor %}
@@ -232,9 +238,12 @@ function updateMediaResize(mr) {
       : w.busy ? `<span class="badge badge-active">${w.current_status}</span>`
       : '<span class="badge badge-ok">Idle</span>';
     const since = w.busy ? timeAgo(w.started_at) : '—';
-    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${since}</td>`;
+    const staleWarn = w.stale_s ? '<span class="stale-warn" title="No live connection to the worker recently — showing last known progress">⚠</span>' : '';
+    const progress = w.pct !== null && w.pct !== undefined ? `${w.estimated ? '~' : ''}${w.pct}%${staleWarn}` : '—';
+    const eta = w.eta_display || '—';
+    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${progress}</td><td class="dim">${eta}</td><td class="dim">${since}</td>`;
   });
-  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Since'], workerRows)
+  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Progress', 'ETA', 'Since'], workerRows)
     + `<div class="total-box" style="margin-top:1rem"><span>${mr.saved_gb}</span> GB
        <span>saved across ${mr.done_count} files &middot; ${mr.queue_count} queued &middot; ${mr.failed_count} failed</span></div>`;
 }

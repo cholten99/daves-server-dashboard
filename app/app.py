@@ -1,9 +1,13 @@
 import gzip
 import glob
+import http.cookiejar
 import json
 import os
 import re
 import sqlite3
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -25,6 +29,14 @@ MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
 KIT_SYNC_LOG    = '/var/log/policycamp/kit-sync.log'
 BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
+
+# media-resize already computes per-worker encode progress/ETA itself (SSH-probes
+# each worker, caches for 30s) -- rather than duplicating that, log into its own
+# /api/data as a regular authenticated client and read the numbers back out.
+MR_BASE_URL  = 'http://127.0.0.1:5001'
+MR_PASSWORD  = os.environ.get('MEDIA_RESIZE_PASSWORD', 'makethemsmaller')
+_mr_cookie_jar = http.cookiejar.CookieJar()
+_mr_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_mr_cookie_jar))
 
 SECURITY_DAYS = 6
 BACKUP_RUNS_LIMIT = 10
@@ -55,6 +67,57 @@ def display_name(filename):
     name = f'{title} S{season:02d}E{episode:02d}.mkv' if season and episode else f'{title}.mkv'
     _display_name_cache[filename] = name
     return name
+
+
+def format_eta(seconds):
+    # Matches media-resize's own ETA formatting exactly (durationHtml() in its
+    # index.html) so the two pages read the same, right down to dropping
+    # seconds once the estimate is a minute or more.
+    if seconds is None:
+        return None
+    s = int(seconds)
+    if s < 60:
+        return f'{s}s'
+    if s < 3600:
+        return f'{s // 60}m'
+    h, m = s // 3600, (s % 3600) // 60
+    return f'{h}h {m}m' if m else f'{h}h'
+
+
+def _mr_login():
+    data = urllib.parse.urlencode({'password': MR_PASSWORD}).encode()
+    req = urllib.request.Request(f'{MR_BASE_URL}/login', data=data, method='POST')
+    _mr_opener.open(req, timeout=5).read()
+
+
+def get_media_resize_progress():
+    """worker name -> {pct, estimated, eta_s, eta_display, stale_s}, sourced live
+    from media-resize's own /api/data rather than re-probing workers over SSH."""
+    for attempt in (1, 2):
+        try:
+            resp = _mr_opener.open(f'{MR_BASE_URL}/api/data', timeout=5)
+            payload = json.loads(resp.read())
+            if 'error' in payload:
+                raise PermissionError('not authed')
+            progress = {}
+            for a in payload.get('active', []):
+                progress[a['worker']] = {
+                    'pct':          a.get('pct'),
+                    'estimated':    a.get('estimated'),
+                    'eta_s':        a.get('eta_s'),
+                    'eta_display':  format_eta(a.get('eta_s')),
+                    'stale_s':      a.get('stale_s'),
+                }
+            return progress
+        except (urllib.error.URLError, PermissionError, json.JSONDecodeError, OSError):
+            if attempt == 1:
+                try:
+                    _mr_login()
+                    continue
+                except (urllib.error.URLError, OSError):
+                    return {}
+            return {}
+    return {}
 
 
 def timeago(ts):
@@ -322,6 +385,8 @@ def get_media_resize_status():
         } for r in active_rows if r['worker']
     }
 
+    progress_by_worker = get_media_resize_progress()
+
     try:
         with open(MR_WORKERS_PATH, 'r') as f:
             workers = json.load(f)
@@ -333,6 +398,10 @@ def get_media_resize_status():
             'current_file':  active_by_worker.get(w['name'], {}).get('filename'),
             'current_status': active_by_worker.get(w['name'], {}).get('status'),
             'started_at':    active_by_worker.get(w['name'], {}).get('started_at'),
+            'pct':           progress_by_worker.get(w['name'], {}).get('pct'),
+            'estimated':     progress_by_worker.get(w['name'], {}).get('estimated'),
+            'eta_display':   progress_by_worker.get(w['name'], {}).get('eta_display'),
+            'stale_s':       progress_by_worker.get(w['name'], {}).get('stale_s'),
         } for w in workers]
     except (OSError, json.JSONDecodeError, KeyError):
         pass
