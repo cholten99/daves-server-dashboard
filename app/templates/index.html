@@ -34,6 +34,11 @@
     @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.3 } }
     .empty { color: #ddd; font-size: .9rem; padding: .5rem 0; }
     .stale-warn { color: #ca6; font-size: .8rem; margin-left: .35rem; cursor: help; }
+    button.toggle {
+      padding: .2rem .65rem; font-size: .8rem; border-radius: 3px; cursor: pointer;
+      background: #2e2e2e; color: #ddd; border: 1px solid #3a3a3a;
+    }
+    button.toggle:hover { background: #363636; color: #ddd; border-color: #555; }
     .issue-list { list-style: none; font-size: .85rem; }
     .issue-list li { padding: .15rem 0; }
     .total-box {
@@ -125,9 +130,9 @@
     <div id="mr-content">
       {% if media_resize.reachable %}
       <table id="mr-workers-table">
-        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Progress</th><th>ETA</th><th>Since</th></tr>
+        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Progress</th><th>ETA</th><th>Since</th><th></th></tr>
         {% for w in media_resize.workers %}
-        <tr>
+        <tr data-worker="{{ w.name }}">
           <td><strong>{{ w.display }}</strong></td>
           <td>
             {% if not w.enabled %}<span class="badge badge-off">Disabled</span>
@@ -141,6 +146,11 @@
           </td>
           <td class="dim">{{ w.eta_display or '—' }}</td>
           <td class="dim">{{ timeago(w.started_at) if w.busy else '—' }}</td>
+          <td>
+            <form method="post" action="/media-resize/toggle/{{ w.name }}" style="display:inline">
+              <button class="toggle" type="submit">{{ 'Enable' if not w.enabled else 'Disable' }}</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
       </table>
@@ -241,9 +251,10 @@ function updateMediaResize(mr) {
     const staleWarn = w.stale_s ? '<span class="stale-warn" title="No live connection to the worker recently — showing last known progress">⚠</span>' : '';
     const progress = w.pct !== null && w.pct !== undefined ? `${w.estimated ? '~' : ''}${w.pct}%${staleWarn}` : '—';
     const eta = w.eta_display || '—';
-    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${progress}</td><td class="dim">${eta}</td><td class="dim">${since}</td>`;
+    const toggleBtn = `<form method="post" action="/media-resize/toggle/${w.name}" style="display:inline"><button class="toggle" type="submit">${w.enabled ? 'Disable' : 'Enable'}</button></form>`;
+    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${progress}</td><td class="dim">${eta}</td><td class="dim">${since}</td><td>${toggleBtn}</td>`;
   });
-  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Progress', 'ETA', 'Since'], workerRows)
+  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Progress', 'ETA', 'Since', ''], workerRows)
     + `<div class="total-box" style="margin-top:1rem"><span>${mr.saved_gb}</span> GB
        <span>saved across ${mr.done_count} files &middot; ${mr.queue_count} queued &middot; ${mr.failed_count} failed</span></div>`;
 }

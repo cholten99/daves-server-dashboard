@@ -90,6 +90,25 @@ def _mr_login():
     _mr_opener.open(req, timeout=5).read()
 
 
+def mr_toggle_worker(name):
+    """POST to media-resize's own /toggle/<name> as an authenticated client --
+    this dashboard has no worker state of its own, it just proxies the click."""
+    for attempt in (1, 2):
+        try:
+            req = urllib.request.Request(f'{MR_BASE_URL}/toggle/{name}', data=b'', method='POST')
+            _mr_opener.open(req, timeout=5).read()
+            return True
+        except (urllib.error.URLError, OSError):
+            if attempt == 1:
+                try:
+                    _mr_login()
+                    continue
+                except (urllib.error.URLError, OSError):
+                    return False
+            return False
+    return False
+
+
 def get_media_resize_progress():
     """worker name -> {pct, estimated, eta_s, eta_display, stale_s}, sourced live
     from media-resize's own /api/data rather than re-probing workers over SSH.
@@ -478,6 +497,14 @@ def api_data():
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     return jsonify(build_dashboard())
+
+
+@app.route('/media-resize/toggle/<name>', methods=['POST'])
+def media_resize_toggle(name):
+    if not authed():
+        return redirect(url_for('login'))
+    mr_toggle_worker(name)
+    return redirect(url_for('index'))
 
 
 @app.route('/backup/<run_id>')
