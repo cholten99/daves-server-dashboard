@@ -92,7 +92,14 @@ def _mr_login():
 
 def get_media_resize_progress():
     """worker name -> {pct, estimated, eta_s, eta_display, stale_s}, sourced live
-    from media-resize's own /api/data rather than re-probing workers over SSH."""
+    from media-resize's own /api/data rather than re-probing workers over SSH.
+
+    media-resize used to expose a separate 'active' list (one entry per busy
+    worker); it now folds pct/estimated/eta_s/stale_s directly onto each entry
+    in 'workers' instead (its dashboard merged a duplicate "In Progress" table
+    into the Workers table). Read from there so idle workers -- which never
+    appeared in 'active' anyway -- still round-trip harmlessly as all-None.
+    """
     for attempt in (1, 2):
         try:
             resp = _mr_opener.open(f'{MR_BASE_URL}/api/data', timeout=5)
@@ -100,13 +107,13 @@ def get_media_resize_progress():
             if 'error' in payload:
                 raise PermissionError('not authed')
             progress = {}
-            for a in payload.get('active', []):
-                progress[a['worker']] = {
-                    'pct':          a.get('pct'),
-                    'estimated':    a.get('estimated'),
-                    'eta_s':        a.get('eta_s'),
-                    'eta_display':  format_eta(a.get('eta_s')),
-                    'stale_s':      a.get('stale_s'),
+            for w in payload.get('workers', []):
+                progress[w['name']] = {
+                    'pct':          w.get('pct'),
+                    'estimated':    w.get('estimated'),
+                    'eta_s':        w.get('eta_s'),
+                    'eta_display':  format_eta(w.get('eta_s')),
+                    'stale_s':      w.get('stale_s'),
                 }
             return progress
         except (urllib.error.URLError, PermissionError, json.JSONDecodeError, OSError):
