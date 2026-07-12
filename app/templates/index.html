@@ -56,8 +56,6 @@
     .todo-done { color: #6d6; }
     .todo-partial { color: #ca6; }
     .todo-open { color: #777; }
-    .view-toggle { display: flex; gap: .4rem; margin-bottom: .75rem; }
-    .view-toggle-btn.active { background: #3a3a3a; color: #fff; border-color: #555; }
     tr.metric-group-start td { border-top: 1px solid #3a3a3a; }
   </style>
 </head>
@@ -106,42 +104,15 @@
   <section>
     <h2><a href="/site-traffic" target="_blank" style="color:inherit;text-decoration:none">Site Traffic</a></h2>
     <p class="dim" style="margin:-.4rem 0 .75rem">Mock data — Search Console / Cloudflare wiring not built yet</p>
-    {% if site_traffic %}
-    <div class="view-toggle">
-      <button class="toggle view-toggle-btn active" type="button" data-view="metric">By metric</button>
-      <button class="toggle view-toggle-btn" type="button" data-view="site">By site</button>
-    </div>
-    {% endif %}
     <div id="traffic-content">
       {% if site_traffic %}
-      <div id="traffic-view-metric">
-        <table>
-          <tr><th>Metric</th>{% for s in site_traffic %}<th>{{ s.name }}</th>{% endfor %}</tr>
-          <tr><td class="dim">Search Console &middot; Daily</td>{% for s in site_traffic %}<td class="dim">{{ s.search_daily }}</td>{% endfor %}</tr>
-          <tr><td class="dim">Search Console &middot; Weekly</td>{% for s in site_traffic %}<td class="dim">{{ s.search_weekly }}</td>{% endfor %}</tr>
-          <tr class="metric-group-start"><td class="dim">Cloudflare &middot; Daily</td>{% for s in site_traffic %}<td class="dim">{{ s.page_daily }}</td>{% endfor %}</tr>
-          <tr><td class="dim">Cloudflare &middot; Weekly</td>{% for s in site_traffic %}<td class="dim">{{ s.page_weekly }}</td>{% endfor %}</tr>
-        </table>
-      </div>
-      <div id="traffic-view-site" style="display:none">
-        <table>
-          <tr>
-            <th rowspan="2">Site</th>
-            <th colspan="2">Search Console</th>
-            <th colspan="2">Cloudflare</th>
-          </tr>
-          <tr><th>Daily</th><th>Weekly</th><th>Daily</th><th>Weekly</th></tr>
-          {% for s in site_traffic %}
-          <tr>
-            <td><strong>{{ s.name }}</strong></td>
-            <td class="dim">{{ s.search_daily }}</td>
-            <td class="dim">{{ s.search_weekly }}</td>
-            <td class="dim">{{ s.page_daily }}</td>
-            <td class="dim">{{ s.page_weekly }}</td>
-          </tr>
-          {% endfor %}
-        </table>
-      </div>
+      <table>
+        <tr><th>Metric</th>{% for s in site_traffic %}<th>{{ s.name }}</th>{% endfor %}</tr>
+        <tr><td class="dim">Search Console &middot; Daily</td>{% for s in site_traffic %}<td class="dim">{{ s.search_daily }}</td>{% endfor %}</tr>
+        <tr><td class="dim">Search Console &middot; Weekly</td>{% for s in site_traffic %}<td class="dim">{{ s.search_weekly }}</td>{% endfor %}</tr>
+        <tr class="metric-group-start"><td class="dim">Cloudflare &middot; Daily</td>{% for s in site_traffic %}<td class="dim">{{ s.page_daily }}</td>{% endfor %}</tr>
+        <tr><td class="dim">Cloudflare &middot; Weekly</td>{% for s in site_traffic %}<td class="dim">{{ s.page_weekly }}</td>{% endfor %}</tr>
+      </table>
       {% else %}
       <p class="empty">No sites configured.</p>
       {% endif %}
@@ -321,43 +292,19 @@ function updateProjects(projects) {
       + `</details>`;
   }).join('');
 }
-function siteViewTable(traffic) {
-  const rows = traffic.map(s =>
-    `<tr><td><strong>${s.name}</strong></td><td class="dim">${s.search_daily}</td><td class="dim">${s.search_weekly}</td><td class="dim">${s.page_daily}</td><td class="dim">${s.page_weekly}</td></tr>`
-  ).join('');
-  return '<table><tr><th rowspan="2">Site</th><th colspan="2">Search Console</th><th colspan="2">Cloudflare</th></tr>'
-    + '<tr><th>Daily</th><th>Weekly</th><th>Daily</th><th>Weekly</th></tr>'
-    + rows + '</table>';
-}
-function metricViewTable(traffic) {
+function updateSiteTraffic(traffic) {
+  const el = document.getElementById('traffic-content');
+  if (!traffic.length) { el.innerHTML = '<p class="empty">No sites configured.</p>'; return; }
   const headerCells = traffic.map(s => `<th>${s.name}</th>`).join('');
   const row = (label, key, groupStart) =>
     `<tr${groupStart ? ' class="metric-group-start"' : ''}><td class="dim">${label}</td>${traffic.map(s => `<td class="dim">${s[key]}</td>`).join('')}</tr>`;
-  return `<table><tr><th>Metric</th>${headerCells}</tr>`
+  el.innerHTML = `<table><tr><th>Metric</th>${headerCells}</tr>`
     + row('Search Console &middot; Daily', 'search_daily')
     + row('Search Console &middot; Weekly', 'search_weekly')
     + row('Cloudflare &middot; Daily', 'page_daily', true)
     + row('Cloudflare &middot; Weekly', 'page_weekly')
     + '</table>';
 }
-function updateSiteTraffic(traffic) {
-  const el = document.getElementById('traffic-content');
-  if (!traffic.length) { el.innerHTML = '<p class="empty">No sites configured.</p>'; return; }
-  const activeView = document.querySelector('.view-toggle-btn.active')?.dataset.view || 'metric';
-  el.innerHTML = `<div id="traffic-view-metric"${activeView !== 'metric' ? ' style="display:none"' : ''}>${metricViewTable(traffic)}</div>`
-    + `<div id="traffic-view-site"${activeView !== 'site' ? ' style="display:none"' : ''}>${siteViewTable(traffic)}</div>`;
-}
-document.addEventListener('click', e => {
-  const btn = e.target.closest('.view-toggle-btn');
-  if (!btn) return;
-  document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  const view = btn.dataset.view;
-  const metricEl = document.getElementById('traffic-view-metric');
-  const siteEl = document.getElementById('traffic-view-site');
-  if (metricEl) metricEl.style.display = view === 'metric' ? '' : 'none';
-  if (siteEl) siteEl.style.display = view === 'site' ? '' : 'none';
-});
 function updateSecurity(security) {
   const el = document.getElementById('security-content');
   if (!security.length) { el.innerHTML = '<p class="empty">No audit runs found in this window.</p>'; return; }
