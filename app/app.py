@@ -56,6 +56,7 @@ SITE_TRAFFIC_WEEKDAY_PATTERN = [1.05, 1.15, 1.15, 1.05, 0.95, 0.75, 0.65]
 PROJECT_TODOS = [
     ('Backup',                            '/home/dave/server-scripts/TODO.md'),
     ('Media Resize',                      '/var/www/media-resize/TODO.md'),
+    ('Site Traffic',                      '/var/www/site-traffic/TODO.md'),
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
 ]
@@ -94,6 +95,13 @@ def display_name(filename):
     g = _guessit(filename)
     title = g.get('title', filename)
     season, episode = g.get('season'), g.get('episode')
+    # guessit returns a list instead of an int for multi-episode files, e.g.
+    # "S01E01-E02" -> episode=[1, 2] -- same bug exists in media-resize's own
+    # app.py; take the first episode of the range rather than crashing.
+    if isinstance(season, list):
+        season = season[0] if season else None
+    if isinstance(episode, list):
+        episode = episode[0] if episode else None
     name = f'{title} S{season:02d}E{episode:02d}.mkv' if season and episode else f'{title}.mkv'
     _display_name_cache[filename] = name
     return name
