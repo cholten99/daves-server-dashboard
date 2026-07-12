@@ -27,8 +27,38 @@ BACKUP_LOGS_DIR = '/home/dave/server-scripts/logs'
 MR_DB_PATH      = '/var/www/media-resize/state.db'
 MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
-KIT_SYNC_LOG    = '/var/log/policycamp/kit-sync.log'
 BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
+
+# MOCK — Search Console (search hits) and Cloudflare (page hits) aren't wired
+# up yet. These are static placeholder numbers so the dashboard layout can be
+# reviewed before building the real data sources; see get_site_traffic().
+SITE_TRAFFIC_SITES = [
+    ('bowsy.co.uk',         'bowsy-co-uk'),
+    ('policycamp.org.uk',   'policycamp-org-uk'),
+    ('transformgov.org.uk', 'transformgov-org-uk'),
+    ('ukgovcomms.org',      'ukgovcomms-org'),
+    ('ukpolyamory.org',     'ukpolyamory-org'),
+]
+SITE_TRAFFIC_MOCK = {
+    'bowsy.co.uk':         {'search_daily': 12, 'search_weekly': 78,  'page_daily': 340, 'page_weekly': 2210},
+    'policycamp.org.uk':   {'search_daily': 34, 'search_weekly': 205, 'page_daily': 890, 'page_weekly': 5920},
+    'transformgov.org.uk': {'search_daily': 8,  'search_weekly': 51,  'page_daily': 210, 'page_weekly': 1380},
+    'ukgovcomms.org':      {'search_daily': 5,  'search_weekly': 29,  'page_daily': 95,  'page_weekly': 640},
+    'ukpolyamory.org':     {'search_daily': 21, 'search_weekly': 140, 'page_daily': 610, 'page_weekly': 4100},
+}
+# Rough Mon-Sun shape (busier midweek, quieter weekends) used only to spread a
+# mock weekly total across 7 days for the expanded page -- not real data.
+SITE_TRAFFIC_WEEKDAY_PATTERN = [1.05, 1.15, 1.15, 1.05, 0.95, 0.75, 0.65]
+
+# Each project's to-do list lives in its own repo/directory as a hand-maintained
+# TODO.md (no auto-sync script -- these are edited manually). Order here is
+# display order on the dashboard.
+PROJECT_TODOS = [
+    ('Backup',                            '/home/dave/server-scripts/TODO.md'),
+    ('Media Resize',                      '/var/www/media-resize/TODO.md'),
+    ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
+    ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
+]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
 # each worker, caches for 30s) -- rather than duplicating that, log into its own
@@ -436,7 +466,6 @@ def get_media_resize_status():
 
 
 JOB_LOG_LINE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? (\w+): (.*)$')
-KIT_DONE_RE = re.compile(r'^Done — (\d+) (?:added|would be added), (\d+) failed$')
 
 
 def _last_job_status(log_path):
@@ -454,18 +483,41 @@ def _last_job_status(log_path):
         ts, level, msg = m.groups()
         if level.upper() == 'ERROR':
             return {'last_run': ts, 'status': 'fail', 'message': msg}
-        done = KIT_DONE_RE.match(msg)
-        if done:
-            failed = int(done.group(2))
-            return {'last_run': ts, 'status': 'warning' if failed else 'ok', 'message': msg}
         return {'last_run': ts, 'status': 'ok', 'message': msg}
     return None
+
+
+def get_site_traffic():
+    """MOCK — see SITE_TRAFFIC_MOCK. Feeds the summary table on the main dashboard."""
+    return [{'name': name, 'slug': slug, **SITE_TRAFFIC_MOCK[name]} for name, slug in SITE_TRAFFIC_SITES]
+
+
+def _mock_daily_series(weekly_total):
+    avg = weekly_total / 7
+    return [max(0, round(avg * p)) for p in SITE_TRAFFIC_WEEKDAY_PATTERN]
+
+
+def get_site_traffic_detail():
+    """MOCK — per-day breakdown for the expanded /site-traffic page. Spreads
+    each site's mock weekly total across the last 7 days; not real data."""
+    days = [(datetime.now() - timedelta(days=i)).strftime('%a %d %b') for i in range(6, -1, -1)]
+    sites = []
+    for name, slug in SITE_TRAFFIC_SITES:
+        base = SITE_TRAFFIC_MOCK[name]
+        sites.append({
+            'name':          name,
+            'slug':          slug,
+            'days':          days,
+            'search_series': _mock_daily_series(base['search_weekly']),
+            'page_series':   _mock_daily_series(base['page_weekly']),
+            **base,
+        })
+    return sites
 
 
 def get_other_jobs():
     jobs = []
     for name, schedule, log_path in [
-        ('Policycamp → Kit sync', 'daily 05:00', KIT_SYNC_LOG),
         ('Bowsy latest-post fetch',    'hourly',      BOWSY_FEED_LOG),
     ]:
         status = _last_job_status(log_path) or {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
@@ -473,8 +525,61 @@ def get_other_jobs():
     return jobs
 
 
+TODO_ITEM_RE = re.compile(r'^(?:\d+\.|-)\s*\[([ xX~])\]\s*(.*)$')
+
+
+def _parse_todo_md(path):
+    """Pulls checkbox items ('1. [x] ...' / '- [ ] ...') out of a hand-maintained
+    TODO.md. Indented lines directly under an item are folded into its detail
+    text (for a hover tooltip); anything unindented (headings, new paragraphs)
+    ends the current item instead of being absorbed into it."""
+    items = []
+    try:
+        with open(path, 'r', errors='ignore') as f:
+            lines = f.readlines()
+    except OSError:
+        return items
+
+    current = None
+    for raw in lines:
+        stripped = raw.strip()
+        m = TODO_ITEM_RE.match(stripped)
+        if m:
+            if current:
+                items.append(current)
+            state, text = m.groups()
+            current = {'state': state.lower(), 'summary': text.strip(), 'detail': text.strip()}
+        elif current is not None and raw[:1].isspace() and stripped and not stripped.startswith('#'):
+            current['detail'] += ' ' + stripped
+        else:
+            if current:
+                items.append(current)
+            current = None
+    if current:
+        items.append(current)
+    return items
+
+
+def get_project_todos():
+    projects = []
+    for name, path in PROJECT_TODOS:
+        items = _parse_todo_md(path)
+        for i, item in enumerate(items, 1):
+            item['number'] = i
+        projects.append({
+            'name':       name,
+            'slug':       re.sub(r'\W+', '-', name.lower()).strip('-'),
+            'todo_items': items,
+            'done':       sum(1 for i in items if i['state'] == 'x'),
+            'total':      len(items),
+        })
+    return projects
+
+
 def build_dashboard():
     return {
+        'project_todos': get_project_todos(),
+        'site_traffic': get_site_traffic(),
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
@@ -505,6 +610,13 @@ def media_resize_toggle(name):
         return redirect(url_for('login'))
     mr_toggle_worker(name)
     return redirect(url_for('index'))
+
+
+@app.route('/site-traffic')
+def site_traffic():
+    if not authed():
+        return redirect(url_for('login'))
+    return render_template('site_traffic.html', sites=get_site_traffic_detail())
 
 
 @app.route('/backup/<run_id>')

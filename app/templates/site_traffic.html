@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site Traffic — Dave's Server</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
+    h2 { font-size: .95rem; color: #eee; margin-bottom: .5rem; font-weight: 600; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; }
+    section { margin-bottom: 2rem; background: #272727; border-radius: 6px; padding: 1rem 1.25rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th { text-align: left; color: #ddd; font-weight: 500; padding: .5rem .75rem; border-bottom: 1px solid #333; }
+    td { padding: .5rem .75rem; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .dim { color: #999; font-size: .85rem; font-weight: 400; }
+    .empty { color: #999; font-size: .9rem; }
+    a.back { color: #69c; text-decoration: none; font-size: .85rem; }
+    a.back:hover { color: #9cf; }
+  </style>
+</head>
+<body>
+  <h1>Site Traffic</h1>
+  <p class="sub">Daily search &amp; page hits per site, last 7 days &middot; <strong>mock data</strong> — Search Console / Cloudflare wiring not built yet</p>
+
+  {% if sites %}
+  {% for s in sites %}
+  <section>
+    <h2>{{ s.name }} <span class="dim">{{ s.search_weekly }} search &middot; {{ s.page_weekly }} page hits this week</span></h2>
+    <table>
+      <tr><th>Day</th><th>Search hits</th><th>Page hits</th></tr>
+      {% for i in range(s.days|length) %}
+      <tr>
+        <td class="dim">{{ s.days[i] }}</td>
+        <td class="dim">{{ s.search_series[i] }}</td>
+        <td class="dim">{{ s.page_series[i] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endfor %}
+  {% else %}
+  <p class="empty">No sites configured.</p>
+  {% endif %}
+
+  <a class="back" href="javascript:window.close()">Close this tab</a>
+</body>
+</html>

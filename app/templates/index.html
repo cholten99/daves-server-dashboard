@@ -46,6 +46,16 @@
       display: inline-block; font-size: 1.1rem; font-weight: 600; color: #6d6;
     }
     .total-box span { color: #ddd; font-size: .85rem; font-weight: 400; margin-left: .4rem; }
+    details.file-group { background: #272727; border-radius: 6px; margin-bottom: .5rem; overflow: hidden; }
+    details.file-group summary { cursor: pointer; padding: .5rem .75rem; color: #ddd; display: flex; gap: .75rem; align-items: center; }
+    details.file-group summary:hover { background: #2e2e2e; }
+    details.file-group summary .dim { margin-left: auto; }
+    details.file-group table { border-radius: 0; }
+    .todo-num { width: 1.8rem; text-align: right; }
+    .todo-state { width: 1.4rem; text-align: center; }
+    .todo-done { color: #6d6; }
+    .todo-partial { color: #ca6; }
+    .todo-open { color: #777; }
   </style>
 </head>
 <body>
@@ -55,6 +65,68 @@
       <a href="/logout">Log out</a>
     </span>
   </h1>
+
+  <!-- ── Projects ── -->
+  <section>
+    <h2>Projects</h2>
+    <div id="projects-content">
+      {% if project_todos %}
+      {% for p in project_todos %}
+      <details class="file-group" data-group="{{ p.slug }}">
+        <summary>
+          <span class="file">{{ p.name }}</span>
+          <span class="dim">{{ p.done }}/{{ p.total }} done</span>
+        </summary>
+        {% if p.todo_items %}
+        <table>
+          <tr><th></th><th></th><th>Item</th></tr>
+          {% for item in p.todo_items %}
+          <tr>
+            <td class="todo-num dim">{{ item.number }}</td>
+            <td class="todo-state {{ 'todo-done' if item.state == 'x' else ('todo-partial' if item.state == '~' else 'todo-open') }}">{{ '☑' if item.state == 'x' else ('◐' if item.state == '~' else '☐') }}</td>
+            <td class="dim" title="{{ item.detail }}">{{ item.summary }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <p class="empty">No items found in this project's TODO.md.</p>
+        {% endif %}
+      </details>
+      {% endfor %}
+      {% else %}
+      <p class="empty">No project to-do files found.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- ── Site Traffic ── -->
+  <section>
+    <h2><a href="/site-traffic" target="_blank" style="color:inherit;text-decoration:none">Site Traffic</a></h2>
+    <p class="dim" style="margin:-.4rem 0 .75rem">Mock data — Search Console / Cloudflare wiring not built yet</p>
+    <div id="traffic-content">
+      {% if site_traffic %}
+      <table>
+        <tr>
+          <th rowspan="2">Site</th>
+          <th colspan="2">Search Console</th>
+          <th colspan="2">Cloudflare</th>
+        </tr>
+        <tr><th>Daily</th><th>Weekly</th><th>Daily</th><th>Weekly</th></tr>
+        {% for s in site_traffic %}
+        <tr>
+          <td><strong>{{ s.name }}</strong></td>
+          <td class="dim">{{ s.search_daily }}</td>
+          <td class="dim">{{ s.search_weekly }}</td>
+          <td class="dim">{{ s.page_daily }}</td>
+          <td class="dim">{{ s.page_weekly }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No sites configured.</p>
+      {% endif %}
+    </div>
+  </section>
 
   <!-- ── Security audit ── -->
   <section>
@@ -202,6 +274,43 @@ function severityBadge(sev, hasIssues) {
   if (sev === 'HIGH') return '<span class="badge badge-high">High</span>';
   return '<span class="badge badge-medium">Medium</span>';
 }
+function todoStateGlyph(state) {
+  if (state === 'x') return { cls: 'todo-done', glyph: '☑' };
+  if (state === '~') return { cls: 'todo-partial', glyph: '◐' };
+  return { cls: 'todo-open', glyph: '☐' };
+}
+function updateProjects(projects) {
+  const el = document.getElementById('projects-content');
+  if (!projects.length) { el.innerHTML = '<p class="empty">No project to-do files found.</p>'; return; }
+  // Groups are fully rebuilt each poll -- remember which ones were expanded
+  // so an open <details> doesn't snap shut out from under the user reading it.
+  const openGroups = new Set(
+    Array.from(el.querySelectorAll('details[open]')).map(d => d.dataset.group)
+  );
+  el.innerHTML = projects.map(p => {
+    const openAttr = openGroups.has(p.slug) ? ' open' : '';
+    const body = p.todo_items.length
+      ? tableHtml(['', '', 'Item'], p.todo_items.map(item => {
+          const { cls, glyph } = todoStateGlyph(item.state);
+          return `<td class="todo-num dim">${item.number}</td><td class="todo-state ${cls}">${glyph}</td><td class="dim" title="${item.detail}">${item.summary}</td>`;
+        }))
+      : '<p class="empty">No items found in this project\'s TODO.md.</p>';
+    return `<details class="file-group" data-group="${p.slug}"${openAttr}>`
+      + `<summary><span class="file">${p.name}</span><span class="dim">${p.done}/${p.total} done</span></summary>`
+      + body
+      + `</details>`;
+  }).join('');
+}
+function updateSiteTraffic(traffic) {
+  const el = document.getElementById('traffic-content');
+  if (!traffic.length) { el.innerHTML = '<p class="empty">No sites configured.</p>'; return; }
+  const rows = traffic.map(s =>
+    `<tr><td><strong>${s.name}</strong></td><td class="dim">${s.search_daily}</td><td class="dim">${s.search_weekly}</td><td class="dim">${s.page_daily}</td><td class="dim">${s.page_weekly}</td></tr>`
+  ).join('');
+  el.innerHTML = '<table><tr><th rowspan="2">Site</th><th colspan="2">Search Console</th><th colspan="2">Cloudflare</th></tr>'
+    + '<tr><th>Daily</th><th>Weekly</th><th>Daily</th><th>Weekly</th></tr>'
+    + rows + '</table>';
+}
 function updateSecurity(security) {
   const el = document.getElementById('security-content');
   if (!security.length) { el.innerHTML = '<p class="empty">No audit runs found in this window.</p>'; return; }
@@ -274,6 +383,8 @@ function poll() {
   fetch('/api/data')
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(data => {
+      updateProjects(data.project_todos);
+      updateSiteTraffic(data.site_traffic);
       updateSecurity(data.security);
       updateBackups(data.backups);
       updateMediaResize(data.media_resize);
