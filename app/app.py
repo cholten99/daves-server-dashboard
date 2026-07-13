@@ -529,6 +529,37 @@ def get_site_traffic():
     return results
 
 
+SPARKLINE_W, SPARKLINE_H = 300, 56
+SPARKLINE_PAD_X, SPARKLINE_PAD_Y = 6, 10
+
+
+def _sparkline(days, series):
+    """Precomputes SVG polyline points + per-point dot positions for a single-
+    series trend chart, scaled to [0, max(series)] so zero is grounded at the
+    baseline. Geometry is computed here, not in the template, matching how the
+    rest of this file precomputes display values (eta_display, etc.)."""
+    n = len(series)
+    if n == 0:
+        return None
+    vmax = max(series) or 1
+    plot_w = SPARKLINE_W - 2 * SPARKLINE_PAD_X
+    plot_h = SPARKLINE_H - 2 * SPARKLINE_PAD_Y
+    step = plot_w / (n - 1) if n > 1 else 0
+    dots = []
+    for i, v in enumerate(series):
+        x = round(SPARKLINE_PAD_X + step * i, 1)
+        y = round(SPARKLINE_PAD_Y + plot_h * (1 - v / vmax), 1)
+        dots.append({'x': x, 'y': y, 'v': v, 'day': days[i]})
+    return {
+        'points': ' '.join(f"{d['x']},{d['y']}" for d in dots),
+        'dots':   dots,
+        'last':   dots[-1],
+        'width':  SPARKLINE_W,
+        'height': SPARKLINE_H,
+        'baseline_y': round(SPARKLINE_PAD_Y + plot_h, 1),
+    }
+
+
 def get_site_traffic_detail():
     """Per-day breakdown for the expanded /site-traffic page."""
     try:
@@ -539,15 +570,20 @@ def get_site_traffic_detail():
     sites = []
     for domain, display in SITE_TRAFFIC_SITES:
         rows = _site_traffic_rows(con, domain)
+        days = [datetime.strptime(r['date'], '%Y-%m-%d').strftime('%a %d %b') for r in rows]
+        search_series = [r['search_clicks'] or 0 for r in rows]
+        page_series = [r['page_human'] or 0 for r in rows]
         sites.append({
             'name':          display,
-            'days':          [datetime.strptime(r['date'], '%Y-%m-%d').strftime('%a %d %b') for r in rows],
-            'search_series': [r['search_clicks'] or 0 for r in rows],
-            'page_series':   [r['page_human'] or 0 for r in rows],
+            'days':          days,
+            'search_series': search_series,
+            'page_series':   page_series,
             'search_daily':  _latest_non_null(rows, 'search_clicks'),
-            'search_weekly': sum(r['search_clicks'] or 0 for r in rows),
+            'search_weekly': sum(search_series),
             'page_daily':    _latest_non_null(rows, 'page_human'),
-            'page_weekly':   sum(r['page_human'] or 0 for r in rows),
+            'page_weekly':   sum(page_series),
+            'search_chart':  _sparkline(days, search_series),
+            'page_chart':    _sparkline(days, page_series),
         })
     con.close()
     return sites

@@ -19,6 +19,11 @@
     .empty { color: #999; font-size: .9rem; }
     a.back { color: #69c; text-decoration: none; font-size: .85rem; }
     a.back:hover { color: #9cf; }
+    .charts { display: flex; gap: 1.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .chart-block { flex: 1 1 220px; min-width: 200px; }
+    .chart-title { font-size: .75rem; color: #999; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .35rem; }
+    .chart-block svg { width: 100%; height: auto; display: block; overflow: visible; }
+    .chart-block circle.hit { fill: transparent; cursor: default; }
   </style>
 </head>
 <body>
@@ -29,6 +34,38 @@
   {% for s in sites %}
   <section>
     <h2>{{ s.name }} <span class="dim">{{ s.search_weekly }} search &middot; {{ s.page_weekly }} page hits this week</span></h2>
+
+    <div class="charts">
+      <div class="chart-block">
+        <div class="chart-title">Search hits</div>
+        {% if s.search_chart %}
+        <svg viewBox="0 0 {{ s.search_chart.width }} {{ s.search_chart.height }}">
+          <line x1="0" y1="{{ s.search_chart.baseline_y }}" x2="{{ s.search_chart.width }}" y2="{{ s.search_chart.baseline_y }}" stroke="#3a3a3a" stroke-width="1"/>
+          <polyline points="{{ s.search_chart.points }}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          {% for d in s.search_chart.dots %}
+          <circle class="hit" cx="{{ d.x }}" cy="{{ d.y }}" r="14"><title>{{ d.day }}: {{ d.v }} search hit{{ 's' if d.v != 1 else '' }}</title></circle>
+          {% endfor %}
+          <circle cx="{{ s.search_chart.last.x }}" cy="{{ s.search_chart.last.y }}" r="4" fill="#3987e5" stroke="#272727" stroke-width="2"/>
+          <text x="{{ s.search_chart.last.x + 8 }}" y="{{ s.search_chart.last.y + 4 }}" font-size="11" fill="#c8c8c8">{{ s.search_chart.last.v }}</text>
+        </svg>
+        {% endif %}
+      </div>
+      <div class="chart-block">
+        <div class="chart-title">Page hits</div>
+        {% if s.page_chart %}
+        <svg viewBox="0 0 {{ s.page_chart.width }} {{ s.page_chart.height }}">
+          <line x1="0" y1="{{ s.page_chart.baseline_y }}" x2="{{ s.page_chart.width }}" y2="{{ s.page_chart.baseline_y }}" stroke="#3a3a3a" stroke-width="1"/>
+          <polyline points="{{ s.page_chart.points }}" fill="none" stroke="#008300" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          {% for d in s.page_chart.dots %}
+          <circle class="hit" cx="{{ d.x }}" cy="{{ d.y }}" r="14"><title>{{ d.day }}: {{ d.v }} page hit{{ 's' if d.v != 1 else '' }}</title></circle>
+          {% endfor %}
+          <circle cx="{{ s.page_chart.last.x }}" cy="{{ s.page_chart.last.y }}" r="4" fill="#008300" stroke="#272727" stroke-width="2"/>
+          <text x="{{ s.page_chart.last.x + 8 }}" y="{{ s.page_chart.last.y + 4 }}" font-size="11" fill="#c8c8c8">{{ s.page_chart.last.v }}</text>
+        </svg>
+        {% endif %}
+      </div>
+    </div>
+
     <table>
       <tr><th>Day</th><th>Search hits</th><th>Page hits</th></tr>
       {% for i in range(s.days|length) %}
