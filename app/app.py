@@ -38,6 +38,9 @@ SITE_TRAFFIC_SITES = [
     ('bowsy.co.uk',         'Bowsy'),
     ('transformgov.org.uk', 'TransformGov'),
     ('ukpolyamory.org',     'UK Polyamory'),
+    ('alobear.co.uk',       'Alo Bear'),
+    ('aloysius-bear.co.uk', 'Aloysius Bear'),
+    ('policycamp.org.uk',   'PolicyCamp'),
 ]
 
 # Each project's to-do list lives in its own repo/directory as a hand-maintained
