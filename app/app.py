@@ -29,26 +29,15 @@ MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
 BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
 
-# MOCK — Search Console (search hits) and Cloudflare (page hits) aren't wired
-# up yet. These are static placeholder numbers so the dashboard layout can be
-# reviewed before building the real data sources; see get_site_traffic().
+# Search hits (Search Console clicks) + page hits (Cloudflare pageViews) per
+# site, pulled daily by site-traffic/pull_daily.py into this DB. Site list
+# here must match SITES in that script -- it owns the data, this just reads it.
+SITE_TRAFFIC_DB = '/var/www/site-traffic/site_traffic.db'
 SITE_TRAFFIC_SITES = [
-    ('bowsy.co.uk',         'bowsy-co-uk'),
-    ('policycamp.org.uk',   'policycamp-org-uk'),
-    ('transformgov.org.uk', 'transformgov-org-uk'),
-    ('ukgovcomms.org',      'ukgovcomms-org'),
-    ('ukpolyamory.org',     'ukpolyamory-org'),
+    ('bowsy.co.uk',         'Bowsy'),
+    ('transformgov.org.uk', 'TransformGov'),
+    ('ukpolyamory.org',     'UK Polyamory'),
 ]
-SITE_TRAFFIC_MOCK = {
-    'bowsy.co.uk':         {'search_daily': 12, 'search_weekly': 78,  'page_daily': 340, 'page_weekly': 2210},
-    'policycamp.org.uk':   {'search_daily': 34, 'search_weekly': 205, 'page_daily': 890, 'page_weekly': 5920},
-    'transformgov.org.uk': {'search_daily': 8,  'search_weekly': 51,  'page_daily': 210, 'page_weekly': 1380},
-    'ukgovcomms.org':      {'search_daily': 5,  'search_weekly': 29,  'page_daily': 95,  'page_weekly': 640},
-    'ukpolyamory.org':     {'search_daily': 21, 'search_weekly': 140, 'page_daily': 610, 'page_weekly': 4100},
-}
-# Rough Mon-Sun shape (busier midweek, quieter weekends) used only to spread a
-# mock weekly total across 7 days for the expanded page -- not real data.
-SITE_TRAFFIC_WEEKDAY_PATTERN = [1.05, 1.15, 1.15, 1.05, 0.95, 0.75, 0.65]
 
 # Each project's to-do list lives in its own repo/directory as a hand-maintained
 # TODO.md (no auto-sync script -- these are edited manually). Order here is
@@ -495,31 +484,67 @@ def _last_job_status(log_path):
     return None
 
 
+def _site_traffic_rows(con, domain, days=7):
+    return con.execute(
+        "SELECT date, search_clicks, page_views FROM daily_stats "
+        "WHERE site=? AND date >= date('now', ?) ORDER BY date",
+        (domain, f'-{days - 1} days'),
+    ).fetchall()
+
+
+def _latest_non_null(rows, key):
+    # Search Console lags 1-2 days behind Cloudflare, so the most recent row
+    # can have one metric populated and the other still NULL -- report each
+    # metric's own most recent value rather than freezing both on one row.
+    for row in reversed(rows):
+        if row[key] is not None:
+            return row[key]
+    return 0
+
+
 def get_site_traffic():
-    """MOCK — see SITE_TRAFFIC_MOCK. Feeds the summary table on the main dashboard."""
-    return [{'name': name, 'slug': slug, **SITE_TRAFFIC_MOCK[name]} for name, slug in SITE_TRAFFIC_SITES]
-
-
-def _mock_daily_series(weekly_total):
-    avg = weekly_total / 7
-    return [max(0, round(avg * p)) for p in SITE_TRAFFIC_WEEKDAY_PATTERN]
+    """Feeds the summary table on the main dashboard. Data comes from
+    site-traffic/pull_daily.py's daily cron pull, not computed here."""
+    try:
+        con = sqlite3.connect(SITE_TRAFFIC_DB, timeout=5)
+        con.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return []
+    results = []
+    for domain, display in SITE_TRAFFIC_SITES:
+        rows = _site_traffic_rows(con, domain)
+        results.append({
+            'name':          display,
+            'search_daily':  _latest_non_null(rows, 'search_clicks'),
+            'search_weekly': sum(r['search_clicks'] or 0 for r in rows),
+            'page_daily':    _latest_non_null(rows, 'page_views'),
+            'page_weekly':   sum(r['page_views'] or 0 for r in rows),
+        })
+    con.close()
+    return results
 
 
 def get_site_traffic_detail():
-    """MOCK — per-day breakdown for the expanded /site-traffic page. Spreads
-    each site's mock weekly total across the last 7 days; not real data."""
-    days = [(datetime.now() - timedelta(days=i)).strftime('%a %d %b') for i in range(6, -1, -1)]
+    """Per-day breakdown for the expanded /site-traffic page."""
+    try:
+        con = sqlite3.connect(SITE_TRAFFIC_DB, timeout=5)
+        con.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return []
     sites = []
-    for name, slug in SITE_TRAFFIC_SITES:
-        base = SITE_TRAFFIC_MOCK[name]
+    for domain, display in SITE_TRAFFIC_SITES:
+        rows = _site_traffic_rows(con, domain)
         sites.append({
-            'name':          name,
-            'slug':          slug,
-            'days':          days,
-            'search_series': _mock_daily_series(base['search_weekly']),
-            'page_series':   _mock_daily_series(base['page_weekly']),
-            **base,
+            'name':          display,
+            'days':          [datetime.strptime(r['date'], '%Y-%m-%d').strftime('%a %d %b') for r in rows],
+            'search_series': [r['search_clicks'] or 0 for r in rows],
+            'page_series':   [r['page_views'] or 0 for r in rows],
+            'search_daily':  _latest_non_null(rows, 'search_clicks'),
+            'search_weekly': sum(r['search_clicks'] or 0 for r in rows),
+            'page_daily':    _latest_non_null(rows, 'page_views'),
+            'page_weekly':   sum(r['page_views'] or 0 for r in rows),
         })
+    con.close()
     return sites
 
 
