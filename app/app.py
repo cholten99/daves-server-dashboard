@@ -29,9 +29,10 @@ MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
 BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
 
-# Search hits (Search Console clicks) + page hits (Cloudflare pageViews) per
-# site, pulled daily by site-traffic/pull_daily.py into this DB. Site list
-# here must match SITES in that script -- it owns the data, this just reads it.
+# Search hits (Search Console clicks) + page hits (Cloudflare Web Analytics
+# RUM human pageloads) per site, pulled daily by site-traffic/pull_daily.py
+# into this DB. Site list here must match SITES in that script -- it owns
+# the data, this just reads it.
 SITE_TRAFFIC_DB = '/var/www/site-traffic/site_traffic.db'
 SITE_TRAFFIC_SITES = [
     ('bowsy.co.uk',         'Bowsy'),
@@ -485,8 +486,12 @@ def _last_job_status(log_path):
 
 
 def _site_traffic_rows(con, domain, days=7):
+    # page_human/page_bot come from Cloudflare Web Analytics (RUM, real
+    # browser beacon) -- raw page_views/page_requests count every response
+    # including crawlers/scrapers and turned out to be ~100-1000x real human
+    # traffic on these sites (verified 2026-07-13), so RUM is what's displayed.
     return con.execute(
-        "SELECT date, search_clicks, page_views FROM daily_stats "
+        "SELECT date, search_clicks, page_human FROM daily_stats "
         "WHERE site=? AND date >= date('now', ?) ORDER BY date",
         (domain, f'-{days - 1} days'),
     ).fetchall()
@@ -517,8 +522,8 @@ def get_site_traffic():
             'name':          display,
             'search_daily':  _latest_non_null(rows, 'search_clicks'),
             'search_weekly': sum(r['search_clicks'] or 0 for r in rows),
-            'page_daily':    _latest_non_null(rows, 'page_views'),
-            'page_weekly':   sum(r['page_views'] or 0 for r in rows),
+            'page_daily':    _latest_non_null(rows, 'page_human'),
+            'page_weekly':   sum(r['page_human'] or 0 for r in rows),
         })
     con.close()
     return results
@@ -538,11 +543,11 @@ def get_site_traffic_detail():
             'name':          display,
             'days':          [datetime.strptime(r['date'], '%Y-%m-%d').strftime('%a %d %b') for r in rows],
             'search_series': [r['search_clicks'] or 0 for r in rows],
-            'page_series':   [r['page_views'] or 0 for r in rows],
+            'page_series':   [r['page_human'] or 0 for r in rows],
             'search_daily':  _latest_non_null(rows, 'search_clicks'),
             'search_weekly': sum(r['search_clicks'] or 0 for r in rows),
-            'page_daily':    _latest_non_null(rows, 'page_views'),
-            'page_weekly':   sum(r['page_views'] or 0 for r in rows),
+            'page_daily':    _latest_non_null(rows, 'page_human'),
+            'page_weekly':   sum(r['page_human'] or 0 for r in rows),
         })
     con.close()
     return sites
