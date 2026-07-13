@@ -35,12 +35,12 @@ BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
 # the data, this just reads it.
 SITE_TRAFFIC_DB = '/var/www/site-traffic/site_traffic.db'
 SITE_TRAFFIC_SITES = [
-    ('bowsy.co.uk',         'Bowsy'),
-    ('transformgov.org.uk', 'TransformGov'),
-    ('ukpolyamory.org',     'UK Polyamory'),
     ('alobear.co.uk',       'Alo Bear'),
     ('aloysius-bear.co.uk', 'Aloysius Bear'),
+    ('bowsy.co.uk',         'Bowsy'),
     ('policycamp.org.uk',   'PolicyCamp'),
+    ('transformgov.org.uk', 'TransformGov'),
+    ('ukpolyamory.org',     'UK Polyamory'),
 ]
 
 # Each project's to-do list lives in its own repo/directory as a hand-maintained
@@ -49,7 +49,6 @@ SITE_TRAFFIC_SITES = [
 PROJECT_TODOS = [
     ('Backup',                            '/home/dave/server-scripts/TODO.md'),
     ('Media Resize',                      '/var/www/media-resize/TODO.md'),
-    ('Site Traffic',                      '/var/www/site-traffic/TODO.md'),
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
 ]
