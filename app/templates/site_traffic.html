@@ -24,6 +24,15 @@
     .chart-title { font-size: .75rem; color: #999; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .35rem; }
     .chart-block svg { width: 100%; height: auto; display: block; overflow: visible; }
     .chart-block circle.hit { fill: transparent; cursor: default; }
+    h2.collapsible {
+      cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between;
+      background: #242424; padding: .5rem .75rem; border-radius: 6px; margin-bottom: 1rem;
+    }
+    h2.collapsible:hover { background: #2a2a2a; }
+    h2.collapsible .chevron { font-size: .7rem; color: #888; transition: transform .15s ease; margin-left: .75rem; }
+    section.collapsed h2.collapsible .chevron { transform: rotate(-90deg); }
+    section.collapsed h2.collapsible { margin-bottom: 0; }
+    section.collapsed > *:not(h2) { display: none; }
   </style>
 </head>
 <body>
@@ -33,7 +42,7 @@
   {% if sites %}
   {% for s in sites %}
   <section>
-    <h2>{{ s.name }} <span class="dim">{{ s.search_weekly }} search &middot; {{ s.page_weekly }} page hits this week</span></h2>
+    <h2 class="collapsible">{{ s.name }} <span class="dim">{{ s.search_weekly }} search &middot; {{ s.page_weekly }} page hits this week</span><span class="chevron">▾</span></h2>
 
     <div class="charts">
       <div class="chart-block">
@@ -83,5 +92,13 @@
   {% endif %}
 
   <a class="back" href="javascript:window.close()">Close this tab</a>
+
+<script>
+document.querySelectorAll('h2.collapsible').forEach(h2 => {
+  h2.addEventListener('click', () => {
+    h2.closest('section').classList.toggle('collapsed');
+  });
+});
+</script>
 </body>
 </html>
