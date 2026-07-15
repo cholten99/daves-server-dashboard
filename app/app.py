@@ -47,7 +47,7 @@ SITE_TRAFFIC_SITES = [
 # TODO.md (no auto-sync script -- these are edited manually). Order here is
 # display order on the dashboard.
 PROJECT_TODOS = [
-    ('Backup',                            '/home/dave/server-scripts/TODO.md'),
+    ('Backup',                            '/home/dave/server-scripts/BACKUP-TODO.md'),
     ('Media Resize',                      '/var/www/media-resize/TODO.md'),
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
