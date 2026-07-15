@@ -51,6 +51,7 @@ PROJECT_TODOS = [
     ('Media Resize',                      '/var/www/media-resize/TODO.md'),
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
+    ('Systemic Issues',                   '/home/dave/server-scripts/SYSTEMIC-ISSUES-TODO.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
