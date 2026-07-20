@@ -96,7 +96,24 @@ def display_name(filename):
         season = season[0] if season else None
     if isinstance(episode, list):
         episode = episode[0] if episode else None
-    name = f'{title} S{season:02d}E{episode:02d}.mkv' if season and episode else f'{title}.mkv'
+    # guessit mis-parses British "Series N Episode M" naming: it finds the
+    # episode fine but shoves "Series N" into alternative_title instead of
+    # season. Recover the season from there rather than dropping it --
+    # E06-only would still collide between e.g. Series 1 Episode 6 and
+    # Series 2 Episode 6, the exact kind of clash this is meant to avoid.
+    if season is None:
+        alt = g.get('alternative_title') or ''
+        if isinstance(alt, list):
+            alt = alt[0] if alt else ''
+        m = re.search(r'(?i)\bseries\s*(\d+)\b', alt)
+        if m:
+            season = int(m.group(1))
+    if season is not None and episode is not None:
+        name = f'{title} S{season:02d}E{episode:02d}.mkv'
+    elif episode is not None:
+        name = f'{title} E{episode:02d}.mkv'
+    else:
+        name = f'{title}.mkv'
     _display_name_cache[filename] = name
     return name
 
