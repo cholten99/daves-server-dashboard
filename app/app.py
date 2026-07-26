@@ -394,26 +394,48 @@ def get_backup_run_detail(run_id):
     except (OSError, json.JSONDecodeError):
         return None
 
-    hd1_actions = []
+    # backup.py groups actions into numbered steps and runs every action within
+    # a step concurrently via ThreadPoolExecutor (steps themselves run one after
+    # another) -- so a step's wall-clock time is bounded by its slowest action,
+    # not the sum of all of them. Group the same way here so the page can show
+    # that, rather than implying everything is purely cumulative.
+    by_step = {}
     for a in d.get('actions', []):
         dest = a.get('destination', '') or ''
-        if not dest.startswith(HD1_PREFIX):
-            continue
         files = _parse_rsync_files(a.get('stdout', ''))
-        hd1_actions.append({
+        duration_s = a.get('duration_seconds')
+        by_step.setdefault(a.get('step', 0), []).append({
             'name':             a.get('name', ''),
             'destination':      dest,
             'status':           a.get('status', ''),
             'file_count':       len(files),
             'files':            files,
-            'duration_display': format_duration(a.get('duration_seconds')),
+            'duration_seconds': duration_s,
+            'duration_display': format_duration(duration_s),
+        })
+
+    steps = []
+    for step_num in sorted(by_step):
+        step_actions = by_step[step_num]
+        wall_s = max((a['duration_seconds'] or 0) for a in step_actions)
+        concurrent = len(step_actions) > 1
+        for a in step_actions:
+            a['bar_pct'] = (
+                min(100, round(100 * (a['duration_seconds'] or 0) / wall_s))
+                if concurrent and wall_s else None
+            )
+        steps.append({
+            'step':          step_num,
+            'concurrent':    concurrent,
+            'wall_display':  format_duration(wall_s),
+            'actions':       step_actions,
         })
 
     return {
         'run_id':     d.get('run_id', safe_id),
         'started_at': d.get('started_at', ''),
         'dry_run':    bool(d.get('dry_run')),
-        'actions':    hd1_actions,
+        'steps':      steps,
     }
 
 

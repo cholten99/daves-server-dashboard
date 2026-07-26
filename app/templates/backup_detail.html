@@ -3,14 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Backup {{ run_id }} — HD1 contents</title>
+  <title>Backup {{ run_id }}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
     h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
     h2 { font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin: 0 0 .5rem; }
     .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; }
-    section { margin-bottom: 2rem; background: #272727; border-radius: 6px; padding: 1rem 1.25rem; }
+    .step-header {
+      display: flex; align-items: baseline; gap: .6rem; margin: 2rem 0 .75rem;
+      font-size: .78rem; color: #888; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .step-header:first-of-type { margin-top: 0; }
+    .step-header .rule { flex: 1; height: 1px; background: #3a3a3a; }
+    section { margin-bottom: 1rem; background: #272727; border-radius: 6px; padding: 1rem 1.25rem; }
     .dest { color: #999; font-size: .8rem; margin-bottom: .5rem; }
     .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; }
     .badge-ok   { background: #1a3a1a; color: #6d6; }
@@ -22,6 +28,8 @@
       white-space: pre-wrap; word-break: break-all;
     }
     .duration { color: #777; }
+    .par-bar { height: 6px; border-radius: 3px; background: #1a1a1a; margin-bottom: .75rem; overflow: hidden; }
+    .par-bar-fill { height: 100%; border-radius: 3px; background: #4a90d9; }
     .empty { color: #999; font-size: .9rem; }
     a.back { color: #69c; text-decoration: none; font-size: .85rem; }
     a.back:hover { color: #9cf; }
@@ -32,11 +40,16 @@
   <h1>Backup {{ run_id }}</h1>
   <p class="sub">This run's log is no longer available — it's past the 30-day retention window and has been rotated out.</p>
   {% else %}
-  <h1>Backup HD1 contents — {{ started_at[:16] | replace('T', ' ') }}{% if dry_run %} <span class="badge badge-warning">Dry run</span>{% endif %}</h1>
-  <p class="sub">Files rsync'd to /mnt/portable1 in this run ({{ run_id }})</p>
+  <h1>Backup — {{ started_at[:16] | replace('T', ' ') }}{% if dry_run %} <span class="badge badge-warning">Dry run</span>{% endif %}</h1>
+  <p class="sub">All actions in this run ({{ run_id }}). Steps run one after another; actions within the same step run concurrently, so a step's wall time is set by its slowest action, not the sum of all of them.</p>
 
-  {% if actions %}
-    {% for a in actions %}
+  {% if steps %}
+    {% for step in steps %}
+    <div class="step-header">
+      <span>Step {{ step.step }}{% if step.concurrent %} — {{ step.actions | length }} actions ran concurrently, step took {{ step.wall_display }}{% endif %}</span>
+      <span class="rule"></span>
+    </div>
+    {% for a in step.actions %}
     <section>
       <h2>{{ a.name }}
         {% if a.status == 'failed' %}<span class="badge fail">failed</span>
@@ -44,6 +57,9 @@
         {% else %}<span class="badge badge-ok">{{ a.file_count }} file{{ 's' if a.file_count != 1 else '' }}</span>{% endif %}
       </h2>
       <div class="dest">&rarr; {{ a.destination }} <span class="duration">({{ a.duration_display }})</span></div>
+      {% if a.bar_pct is not none %}
+      <div class="par-bar"><div class="par-bar-fill" style="width: {{ a.bar_pct }}%"></div></div>
+      {% endif %}
       {% if a.files %}
       <pre class="filelist">{% for f in a.files %}{{ f }}
 {% endfor %}</pre>
@@ -52,8 +68,9 @@
       {% endif %}
     </section>
     {% endfor %}
+    {% endfor %}
   {% else %}
-  <p class="empty">No actions in this run wrote to HD1 (/mnt/portable1).</p>
+  <p class="empty">No actions recorded for this run.</p>
   {% endif %}
   {% endif %}
 
