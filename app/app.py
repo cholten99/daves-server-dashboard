@@ -401,11 +401,12 @@ def get_backup_run_detail(run_id):
             continue
         files = _parse_rsync_files(a.get('stdout', ''))
         hd1_actions.append({
-            'name':        a.get('name', ''),
-            'destination': dest,
-            'status':      a.get('status', ''),
-            'file_count':  len(files),
-            'files':       files,
+            'name':             a.get('name', ''),
+            'destination':      dest,
+            'status':           a.get('status', ''),
+            'file_count':       len(files),
+            'files':            files,
+            'duration_display': format_duration(a.get('duration_seconds')),
         })
 
     return {

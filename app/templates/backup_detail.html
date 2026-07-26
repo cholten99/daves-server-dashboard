@@ -21,6 +21,7 @@
       padding: .75rem 1rem; font-size: .82rem; line-height: 1.5; color: #bbb;
       white-space: pre-wrap; word-break: break-all;
     }
+    .duration { color: #777; }
     .empty { color: #999; font-size: .9rem; }
     a.back { color: #69c; text-decoration: none; font-size: .85rem; }
     a.back:hover { color: #9cf; }
@@ -42,7 +43,7 @@
         {% elif a.status == 'warning' %}<span class="badge badge-warning">warning</span>
         {% else %}<span class="badge badge-ok">{{ a.file_count }} file{{ 's' if a.file_count != 1 else '' }}</span>{% endif %}
       </h2>
-      <div class="dest">&rarr; {{ a.destination }}</div>
+      <div class="dest">&rarr; {{ a.destination }} <span class="duration">({{ a.duration_display }})</span></div>
       {% if a.files %}
       <pre class="filelist">{% for f in a.files %}{{ f }}
 {% endfor %}</pre>
