@@ -402,17 +402,42 @@ def get_backup_run_detail(run_id):
     by_step = {}
     for a in d.get('actions', []):
         dest = a.get('destination', '') or ''
-        files = _parse_rsync_files(a.get('stdout', ''))
         duration_s = a.get('duration_seconds')
-        by_step.setdefault(a.get('step', 0), []).append({
+        entry = {
             'name':             a.get('name', ''),
             'destination':      dest,
             'status':           a.get('status', ''),
-            'file_count':       len(files),
-            'files':            files,
             'duration_seconds': duration_s,
             'duration_display': format_duration(duration_s),
-        })
+        }
+        rclone_summary = a.get('rclone_summary')
+        if a.get('type') == 'rclone' and rclone_summary is not None:
+            # backup.py now runs rclone with --use-json-log so this is a real
+            # count, not a guess -- see _parse_rclone_json_log() there.
+            entry['transfer_kind'] = 'rclone'
+            entry['transferred']   = rclone_summary.get('transferred', 0)
+            entry['checked']       = rclone_summary.get('checked', 0)
+            entry['deleted']       = rclone_summary.get('deleted', 0)
+            entry['file_count']    = entry['transferred']
+            entry['files']         = a.get('rclone_changes', [])
+            entry['warnings']      = a.get('rclone_warnings', [])
+        elif a.get('type') == 'rclone':
+            # Log predates the --use-json-log change -- rclone's stdout is
+            # always empty by design, so there is no reliable count for these
+            # older runs. Showing '0 files' here would just reintroduce the
+            # exact took an hour, moved nothing? confusion this was meant
+            # to fix, so say plainly that detail isn't available instead.
+            entry['transfer_kind'] = 'rclone_legacy'
+            entry['file_count']    = None
+            entry['files']         = []
+            entry['warnings']      = []
+        else:
+            files = _parse_rsync_files(a.get('stdout', ''))
+            entry['transfer_kind'] = 'rsync'
+            entry['file_count']    = len(files)
+            entry['files']         = files
+            entry['warnings']      = []
+        by_step.setdefault(a.get('step', 0), []).append(entry)
 
     steps = []
     for step_num in sorted(by_step):

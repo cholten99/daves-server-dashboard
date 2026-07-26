@@ -22,14 +22,17 @@
     .badge-ok   { background: #1a3a1a; color: #6d6; }
     .badge.fail { background: #3a1a1a; color: #e55; }
     .badge-warning { background: #2a2a1a; color: #ca6; }
+    .badge-muted { background: #2a2a2a; color: #999; }
     pre.filelist {
       max-height: 420px; overflow-y: auto; background: #1a1a1a; border-radius: 4px;
       padding: .75rem 1rem; font-size: .82rem; line-height: 1.5; color: #bbb;
       white-space: pre-wrap; word-break: break-all;
     }
+    pre.filelist.warnings { color: #ca6; margin-top: .5rem; }
+    .checked { color: #777; font-size: .78rem; margin-bottom: .5rem; }
     .duration { color: #777; }
     .par-bar { height: 6px; border-radius: 3px; background: #1a1a1a; margin-bottom: .75rem; overflow: hidden; }
-    .par-bar-fill { height: 100%; border-radius: 3px; background: #4a90d9; }
+    .par-bar-fill { height: 100%; border-radius: 3px; background: #4a7aa8; }
     .empty { color: #999; font-size: .9rem; }
     a.back { color: #69c; text-decoration: none; font-size: .85rem; }
     a.back:hover { color: #9cf; }
@@ -54,17 +57,30 @@
       <h2>{{ a.name }}
         {% if a.status == 'failed' %}<span class="badge fail">failed</span>
         {% elif a.status == 'warning' %}<span class="badge badge-warning">warning</span>
+        {% elif a.transfer_kind == 'rclone_legacy' %}<span class="badge badge-muted">no detail captured</span>
+        {% elif a.transfer_kind == 'rclone' %}<span class="badge badge-ok">{{ a.transferred }} transferred</span>
         {% else %}<span class="badge badge-ok">{{ a.file_count }} file{{ 's' if a.file_count != 1 else '' }}</span>{% endif %}
       </h2>
       <div class="dest">&rarr; {{ a.destination }} <span class="duration">({{ a.duration_display }})</span></div>
       {% if a.bar_pct is not none %}
       <div class="par-bar"><div class="par-bar-fill" style="width: {{ a.bar_pct }}%"></div></div>
       {% endif %}
-      {% if a.files %}
+      {% if a.transfer_kind == 'rclone' %}
+      <div class="checked">{{ a.checked }} file{{ 's' if a.checked != 1 else '' }} checked{% if a.deleted %}, {{ a.deleted }} deleted{% endif %}</div>
+      {% endif %}
+      {% if a.transfer_kind == 'rclone_legacy' %}
+      <p class="empty">This run predates real transfer counts for rclone actions — can't tell from this log whether anything actually changed.</p>
+      {% elif a.files %}
       <pre class="filelist">{% for f in a.files %}{{ f }}
 {% endfor %}</pre>
+      {% elif a.transfer_kind == 'rclone' %}
+      <p class="empty">Nothing to transfer (checked {{ a.checked }} file{{ 's' if a.checked != 1 else '' }}, no changes since last run).</p>
       {% else %}
       <p class="empty">No files transferred (nothing changed since last run).</p>
+      {% endif %}
+      {% if a.warnings %}
+      <pre class="filelist warnings">{% for w in a.warnings %}{{ w }}
+{% endfor %}</pre>
       {% endif %}
     </section>
     {% endfor %}
