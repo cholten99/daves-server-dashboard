@@ -53,6 +53,7 @@ PROJECT_TODOS = [
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
     ('Systemic Issues',                   '/home/dave/server-scripts/SYSTEMIC-ISSUES-TODO.md'),
     ('Nationalstrategy.uk Domain Transfer', '/home/dave/Tech Docs/nationalstrategy-uk-domain-transfer.md'),
+    ('Unofficial Andy (Bluesky cross-poster)', '/home/dave/unofficial-andy/ARCHITECTURE.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
