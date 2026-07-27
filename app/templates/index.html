@@ -108,6 +108,26 @@
     </div>
   </section>
 
+  <!-- ── Bluesky Followers ── -->
+  <section>
+    <h2 class="collapsible">Bluesky Followers<span class="chevron">▾</span></h2>
+    <div id="bluesky-content">
+      {% if bluesky_followers %}
+      <table>
+        <tr><th>Account</th><th>Followers</th></tr>
+        {% for b in bluesky_followers %}
+        <tr>
+          <td><a href="https://bsky.app/profile/{{ b.handle }}" target="_blank" style="color:inherit">{{ b.name }}</a> <span class="dim">@{{ b.handle }}</span></td>
+          <td>{% if b.ok %}{{ b.followers }}{% else %}<span class="badge fail">lookup failed</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No Bluesky accounts configured.</p>
+      {% endif %}
+    </div>
+  </section>
+
   <!-- ── Site Traffic ── -->
   <section>
     <h2 class="collapsible"><a href="/site-traffic" target="_blank" style="color:inherit;text-decoration:none">Site Traffic</a><span class="chevron">▾</span></h2>

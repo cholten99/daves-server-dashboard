@@ -43,6 +43,26 @@ SITE_TRAFFIC_SITES = [
     ('ukpolyamory.org',     'UK Polyamory'),
 ]
 
+# Bluesky handles to show follower counts for, alphabetical by handle (matches
+# how the user asked for the row to be ordered). Fetched live from Bluesky's
+# public (unauthenticated) AppView API and cached in-process -- see
+# BLUESKY_CACHE_TTL below -- rather than needing a whole new cron+DB pipeline
+# like site-traffic has, since this is a single cheap number per account.
+BLUESKY_API_BASE = 'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile'
+BLUESKY_ACCOUNTS = [
+    ('bowsy.co.uk',                  'Bowsy'),
+    ('policycamp.bsky.social',       'Policy Camp'),
+    ('polyday.bsky.social',          'Poly Day'),
+    ('still-love-it.bsky.social',    'Will You Still Love It Tomorrow'),
+    ('transformgovtalks.bsky.social', 'TransformGov Talks'),
+    ('uk-poly-assoc.bsky.social',    'UK Polyamory Association'),
+    ('ukgovcamp.com',                'UK Gov Camp'),
+    ('ukgovcomms.bsky.social',       'UK Gov Comms'),
+    ('unofficialandy.bsky.social',   'Unofficial Andy'),
+]
+BLUESKY_CACHE_TTL = timedelta(minutes=15)
+_bluesky_cache = {'fetched_at': None, 'data': []}
+
 # Each project's to-do list lives in its own repo/directory as a hand-maintained
 # TODO.md (no auto-sync script -- these are edited manually). Order here is
 # display order on the dashboard.
@@ -577,6 +597,34 @@ def _latest_non_null(rows, key):
     return 0
 
 
+def get_bluesky_followers():
+    """Live-fetches follower counts from Bluesky's public AppView API,
+    cached in-process for BLUESKY_CACHE_TTL. A failed/unresolvable handle
+    (e.g. a typo, or a handle that genuinely isn't registered) shows as
+    'error' rather than silently dropping the row or showing 0, since those
+    two cases mean very different things here."""
+    now = datetime.now()
+    if _bluesky_cache['fetched_at'] and now - _bluesky_cache['fetched_at'] < BLUESKY_CACHE_TTL:
+        return _bluesky_cache['data']
+
+    results = []
+    for handle, display in BLUESKY_ACCOUNTS:
+        entry = {'name': display, 'handle': handle, 'followers': None, 'ok': False}
+        try:
+            url = f'{BLUESKY_API_BASE}?{urllib.parse.urlencode({"actor": handle})}'
+            with urllib.request.urlopen(url, timeout=8) as resp:
+                data = json.loads(resp.read())
+            entry['followers'] = data.get('followersCount', 0)
+            entry['ok'] = True
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
+            pass
+        results.append(entry)
+
+    _bluesky_cache['fetched_at'] = now
+    _bluesky_cache['data'] = results
+    return results
+
+
 def get_site_traffic():
     """Feeds the summary table on the main dashboard. Data comes from
     site-traffic/pull_daily.py's daily cron pull, not computed here."""
@@ -723,6 +771,7 @@ def get_project_todos():
 def build_dashboard():
     return {
         'project_todos': get_project_todos(),
+        'bluesky_followers': get_bluesky_followers(),
         'site_traffic': get_site_traffic(),
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
