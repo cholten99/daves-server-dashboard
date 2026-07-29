@@ -73,7 +73,6 @@ PROJECT_TODOS = [
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
     ('Systemic Issues',                   '/home/dave/server-scripts/SYSTEMIC-ISSUES-TODO.md'),
     ('Nationalstrategy.uk Domain Transfer', '/home/dave/Tech Docs/nationalstrategy-uk-domain-transfer.md'),
-    ('Unofficial Andy (Bluesky cross-poster)', '/home/dave/unofficial-andy/ARCHITECTURE.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
@@ -129,12 +128,22 @@ def display_name(filename):
         m = re.search(r'(?i)\bseries\s*(\d+)\b', alt)
         if m:
             season = int(m.group(1))
+    part = g.get('part')
+    if isinstance(part, list):
+        part = part[0] if part else None
+    part_suffix = f'.Part{part}' if part is not None else ''
     if season is not None and episode is not None:
-        name = f'{title} S{season:02d}E{episode:02d}.mkv'
+        name = f'{title} S{season:02d}E{episode:02d}{part_suffix}.mkv'
     elif episode is not None:
-        name = f'{title} E{episode:02d}.mkv'
+        name = f'{title} E{episode:02d}{part_suffix}.mkv'
     else:
-        name = f'{title}.mkv'
+        # Same fallback-to-original-stem fix applied to media-resize's own
+        # app.py on 2026-07-30: without it, unrelated files guessit reduces to
+        # the same bare title (no season/episode found) show up here as if
+        # they collide, even though media-resize's clean_stem() -- the function
+        # that actually decides the delivery path -- already keeps them
+        # distinct. Keep this mirrored fix in sync with the other copy.
+        name = f'{os.path.splitext(filename)[0]}.mkv'
     _display_name_cache[filename] = name
     return name
 
