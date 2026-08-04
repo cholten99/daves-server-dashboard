@@ -38,6 +38,7 @@ SITE_TRAFFIC_SITES = [
     ('alobear.co.uk',       'Alo Bear'),
     ('aloysius-bear.co.uk', 'Aloysius Bear'),
     ('bowsy.co.uk',         'Bowsy'),
+    ('nationalstrategy.uk', 'National Strategy'),
     ('policycamp.org.uk',   'PolicyCamp'),
     ('transformgov.org.uk', 'TransformGov'),
     ('ukpolyamory.org',     'UK Polyamory'),
