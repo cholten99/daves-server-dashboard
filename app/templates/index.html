@@ -33,6 +33,7 @@
     .badge-warning  { background: #2a2a1a; color: #ca6; }
     .dim   { color: #ddd; font-size: .85rem; }
     .file  { color: #ddd; }
+    .todo-detail { color: #999; font-size: .8rem; margin-top: .25rem; }
     .saved { color: #6d6; font-weight: 500; }
     .nav { float: right; font-size: .85rem; display: flex; align-items: center; gap: 1rem; }
     .nav a { color: #ddd; text-decoration: none; }
@@ -93,7 +94,7 @@
           <tr>
             <td class="todo-num dim">{{ item.number }}</td>
             <td class="todo-state {{ 'todo-done' if item.state == 'x' else ('todo-partial' if item.state == '~' else 'todo-open') }}">{{ '☑' if item.state == 'x' else ('◐' if item.state == '~' else '☐') }}</td>
-            <td class="dim" title="{{ item.detail }}">{{ item.summary }}</td>
+            <td class="dim">{{ item.summary }}{% if item.extra %}<div class="todo-detail">{{ item.extra }}</div>{% endif %}</td>
           </tr>
           {% endfor %}
         </table>
@@ -310,7 +311,8 @@ function updateProjects(projects) {
     const body = p.todo_items.length
       ? tableHtml(['', '', 'Item'], p.todo_items.map(item => {
           const { cls, glyph } = todoStateGlyph(item.state);
-          return `<td class="todo-num dim">${item.number}</td><td class="todo-state ${cls}">${glyph}</td><td class="dim" title="${item.detail}">${item.summary}</td>`;
+          const extra = item.extra ? `<div class="todo-detail">${item.extra}</div>` : '';
+          return `<td class="todo-num dim">${item.number}</td><td class="todo-state ${cls}">${glyph}</td><td class="dim">${item.summary}${extra}</td>`;
         }))
       : '<p class="empty">No items found in this project\'s TODO.md.</p>';
     return `<details class="file-group" data-group="${p.slug}"${openAttr}>`

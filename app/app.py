@@ -68,12 +68,8 @@ _bluesky_cache = {'fetched_at': None, 'data': []}
 # TODO.md (no auto-sync script -- these are edited manually). Order here is
 # display order on the dashboard.
 PROJECT_TODOS = [
-    ('Backup',                            '/home/dave/server-scripts/BACKUP-TODO.md'),
-    ('Media Resize',                      '/var/www/media-resize/TODO.md'),
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
-    ('Systemic Issues',                   '/home/dave/server-scripts/SYSTEMIC-ISSUES-TODO.md'),
-    ('Nationalstrategy.uk Domain Transfer', '/home/dave/Tech Docs/nationalstrategy-uk-domain-transfer.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
@@ -768,6 +764,11 @@ def get_project_todos():
         items = _parse_todo_md(path)
         for i, item in enumerate(items, 1):
             item['number'] = i
+            # detail always starts with summary's own text (see _parse_todo_md) --
+            # extra is just whatever got folded in beyond that (indented sub-bullet
+            # lines), so it can be shown as its own visible line rather than only
+            # in a hover-only title attribute.
+            item['extra'] = item['detail'][len(item['summary']):].strip()
         projects.append({
             'name':       name,
             'slug':       re.sub(r'\W+', '-', name.lower()).strip('-'),
