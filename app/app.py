@@ -70,6 +70,7 @@ _bluesky_cache = {'fetched_at': None, 'data': []}
 PROJECT_TODOS = [
     ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
     ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
+    ('Daves Apps Restart',                '/var/www/daves-apps/daves-apps/TODO.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
@@ -77,6 +78,11 @@ PROJECT_TODOS = [
 # /api/data as a regular authenticated client and read the numbers back out.
 MR_BASE_URL  = 'http://127.0.0.1:5001'
 MR_PASSWORD  = os.environ.get('MEDIA_RESIZE_PASSWORD', 'makethemsmaller')
+# A Mac worker toggle can take up to ~16s server-side (two SSH attempts --
+# meshnet then LAN fallback -- at up to 8s each), plus overhead. This must
+# stay comfortably above that; see mr_toggle_worker() for why a too-short
+# timeout here is actively harmful, not just slow.
+MR_TOGGLE_TIMEOUT = 25
 _mr_cookie_jar = http.cookiejar.CookieJar()
 _mr_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_mr_cookie_jar))
 
@@ -168,21 +174,35 @@ def _mr_login():
 
 def mr_toggle_worker(name):
     """POST to media-resize's own /toggle/<name> as an authenticated client --
-    this dashboard has no worker state of its own, it just proxies the click."""
-    for attempt in (1, 2):
+    this dashboard has no worker state of its own, it just proxies the click.
+
+    Toggle is a plain flip, not idempotent, so a timeout here must NOT be
+    retried as if it were a fresh attempt -- media-resize's own handler can
+    legitimately take close to MR_TOGGLE_TIMEOUT for a Mac worker (it tries
+    an SSH launchctl call over meshnet, then a LAN fallback, before giving
+    up), so a request that "times out" here may well have already flipped
+    the flag server-side. Retrying blindly (as this used to) sends a second
+    flip and cancels the first one out -- confirmed 2026-09-08, every click
+    on macair-new's Enable button produced a load-then-unload pair in
+    media-resize's toggle.log and left it right back where it started.
+
+    Only a genuine auth failure (session expired, 403) is safe to retry --
+    media-resize never touched its state for a rejected request."""
+    req = urllib.request.Request(f'{MR_BASE_URL}/toggle/{name}', data=b'', method='POST')
+    try:
+        _mr_opener.open(req, timeout=MR_TOGGLE_TIMEOUT).read()
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code != 403:
+            return False
         try:
-            req = urllib.request.Request(f'{MR_BASE_URL}/toggle/{name}', data=b'', method='POST')
-            _mr_opener.open(req, timeout=5).read()
+            _mr_login()
+            _mr_opener.open(req, timeout=MR_TOGGLE_TIMEOUT).read()
             return True
         except (urllib.error.URLError, OSError):
-            if attempt == 1:
-                try:
-                    _mr_login()
-                    continue
-                except (urllib.error.URLError, OSError):
-                    return False
             return False
-    return False
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 def get_media_resize_progress():
