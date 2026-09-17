@@ -258,13 +258,13 @@
     </div>
   </section>
 
-  <!-- ── Other Jobs ── -->
+  <!-- ── Cron Jobs ── -->
   <section>
-    <h2 class="collapsible">Other Jobs<span class="chevron">▾</span></h2>
+    <h2 class="collapsible">Cron Jobs<span class="chevron">▾</span></h2>
     <div id="jobs-content">
       <table>
         <tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
-        {% for j in other_jobs %}
+        {% for j in cron_jobs %}
         <tr>
           <td><strong>{{ j.name }}</strong></td>
           <td class="dim">{{ j.schedule }}</td>
@@ -411,7 +411,7 @@ function poll() {
       updateSecurity(data.security);
       updateBackups(data.backups);
       updateMediaResize(data.media_resize);
-      updateJobs(data.other_jobs);
+      updateJobs(data.cron_jobs);
       document.getElementById('pulse').classList.add('live');
     })
     .catch(() => {

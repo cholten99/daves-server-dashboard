@@ -41,6 +41,7 @@ SITE_TRAFFIC_SITES = [
     ('nationalstrategy.uk', 'National Strategy'),
     ('policycamp.org.uk',   'PolicyCamp'),
     ('transformgov.org.uk', 'TransformGov'),
+    ('ukgovcamp.com',       'UK Gov Camp'),
     ('ukpolyamory.org',     'UK Polyamory'),
 ]
 
@@ -713,13 +714,44 @@ def get_site_traffic_detail():
     return sites
 
 
-def get_other_jobs():
+def get_cron_jobs():
+    """All jobs on daves-home-server's crontab (user dave), not just the ones
+    without their own dashboard section -- this table is meant to be the
+    complete picture. Backup and security audit already have detailed
+    sections above, so their status here is derived from that same data
+    rather than re-parsing logs a second way."""
     jobs = []
+
     for name, schedule, log_path in [
-        ('Bowsy latest-post fetch',    'hourly',      BOWSY_FEED_LOG),
+        ('Bowsy latest-post fetch', 'Hourly', BOWSY_FEED_LOG),
     ]:
         status = _last_job_status(log_path) or {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
         jobs.append({'name': name, 'schedule': schedule, **status})
+
+    backups = get_backup_runs(limit=1)
+    if backups:
+        b = backups[0]
+        status = 'fail' if b['failed'] else ('warning' if b['warning'] else 'ok')
+        message = f"{b['success']}/{b['total']} actions succeeded"
+        jobs.append({'name': 'Full backup', 'schedule': 'Daily at 05:00', 'last_run': b['started_at'], 'status': status, 'message': message})
+    else:
+        jobs.append({'name': 'Full backup', 'schedule': 'Daily at 05:00', 'last_run': None, 'status': 'unknown', 'message': 'No runs found'})
+
+    security = get_security_findings()
+    if security:
+        s = security[0]
+        status = 'ok' if not s['issues'] else ('fail' if s['max_severity'] in ('CRITICAL', 'HIGH') else 'warning')
+        message = f"{len(s['issues'])} finding{'s' if len(s['issues']) != 1 else ''}" if s['issues'] else 'No issues found'
+        jobs.append({'name': 'Security audit', 'schedule': 'Daily at 06:00', 'last_run': s['when'], 'status': status, 'message': message})
+    else:
+        jobs.append({'name': 'Security audit', 'schedule': 'Daily at 06:00', 'last_run': None, 'status': 'unknown', 'message': 'No runs found in this window'})
+
+    # These two don't have a log this dashboard reads yet -- shown for
+    # completeness rather than left off the table, but status is honestly
+    # 'unknown' rather than guessed.
+    jobs.append({'name': 'Site traffic pull', 'schedule': 'Daily at 06:30', 'last_run': None, 'status': 'unknown', 'message': 'Not wired into this dashboard yet'})
+    jobs.append({'name': 'Media-resize remote watchdog', 'schedule': 'Hourly', 'last_run': None, 'status': 'unknown', 'message': 'Not wired into this dashboard yet'})
+
     return jobs
 
 
@@ -787,7 +819,7 @@ def build_dashboard():
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
-        'other_jobs': get_other_jobs(),
+        'cron_jobs': get_cron_jobs(),
     }
 
 
