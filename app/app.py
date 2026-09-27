@@ -68,14 +68,6 @@ BLUESKY_ACCOUNTS = [
 BLUESKY_CACHE_TTL = timedelta(minutes=15)
 _bluesky_cache = {'fetched_at': None, 'data': []}
 
-# Each project's to-do list lives in its own repo/directory as a hand-maintained
-# TODO.md (no auto-sync script -- these are edited manually). Order here is
-# display order on the dashboard.
-PROJECT_TODOS = [
-    ('Google Workspace Migration',        '/home/dave/projects/google-workspace-migration/TODO.md'),
-    ('Daves Apps Restart',                '/var/www/daves-apps/daves-apps/TODO.md'),
-    ('Notify Printer',                     '/var/www/notify-printer/TODO.md'),
-]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
 # each worker, caches for 30s) -- rather than duplicating that, log into its own
@@ -94,12 +86,14 @@ SECURITY_DAYS = 6
 BACKUP_RUNS_LIMIT = 10
 HD1_PREFIX = '/mnt/portable1'
 
-# Ideas board: coding-project / paper / blog-post ideas, tracked as a small
+# Projects board: coding-project / paper / blog-post ideas, tracked as a small
 # two-column Trello-like board (backlog -> current) rather than a hand-edited
 # TODO.md like PROJECT_TODOS above. This app owns the schema outright (unlike
 # the read-only DBs elsewhere in this file), so it creates it on load.
-IDEAS_DB_PATH = os.path.join(os.path.dirname(__file__), 'ideas.db')
-IDEAS_LISTS = ('backlog', 'current')
+PROJECTS_DB_PATH = os.path.join(os.path.dirname(__file__), 'projects.db')
+PROJECTS_LISTS = ('backlog', 'current')
+PROJECT_TAGS = ('code', 'blog', 'paper')
+_UNSET = object()
 
 SEVERITY_RANK = {'CRITICAL': 3, 'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
 
@@ -832,70 +826,14 @@ def get_cron_jobs():
     return jobs
 
 
-TODO_ITEM_RE = re.compile(r'^(?:\d+\.|-)\s*\[([ xX~])\]\s*(.*)$')
+# ── Projects board ──────────────────────────────────────────────────────────────
 
-
-def _parse_todo_md(path):
-    """Pulls checkbox items ('1. [x] ...' / '- [ ] ...') out of a hand-maintained
-    TODO.md. Indented lines directly under an item are folded into its detail
-    text (for a hover tooltip); anything unindented (headings, new paragraphs)
-    ends the current item instead of being absorbed into it."""
-    items = []
-    try:
-        with open(path, 'r', errors='ignore') as f:
-            lines = f.readlines()
-    except OSError:
-        return items
-
-    current = None
-    for raw in lines:
-        stripped = raw.strip()
-        m = TODO_ITEM_RE.match(stripped)
-        if m:
-            if current:
-                items.append(current)
-            state, text = m.groups()
-            current = {'state': state.lower(), 'summary': text.strip(), 'detail': text.strip()}
-        elif current is not None and raw[:1].isspace() and stripped and not stripped.startswith('#'):
-            current['detail'] += ' ' + stripped
-        else:
-            if current:
-                items.append(current)
-            current = None
-    if current:
-        items.append(current)
-    return items
-
-
-def get_project_todos():
-    projects = []
-    for name, path in PROJECT_TODOS:
-        items = _parse_todo_md(path)
-        for i, item in enumerate(items, 1):
-            item['number'] = i
-            # detail always starts with summary's own text (see _parse_todo_md) --
-            # extra is just whatever got folded in beyond that (indented sub-bullet
-            # lines), so it can be shown as its own visible line rather than only
-            # in a hover-only title attribute.
-            item['extra'] = item['detail'][len(item['summary']):].strip()
-        projects.append({
-            'name':       name,
-            'slug':       re.sub(r'\W+', '-', name.lower()).strip('-'),
-            'todo_items': items,
-            'done':       sum(1 for i in items if i['state'] == 'x'),
-            'total':      len(items),
-        })
-    return projects
-
-
-# ── Ideas board ──────────────────────────────────────────────────────────────
-
-IDEAS_ALLOWED_TAGS = {
+PROJECTS_ALLOWED_TAGS = {
     'p', 'br', 'div', 'span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike',
     'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre',
 }
-IDEAS_VOID_TAGS = {'br'}
-IDEAS_LINK_SCHEME_RE = re.compile(r'^(https?:|mailto:)', re.I)
+PROJECTS_VOID_TAGS = {'br'}
+PROJECTS_LINK_SCHEME_RE = re.compile(r'^(https?:|mailto:)', re.I)
 
 
 class _RichTextSanitizer(HTMLParser):
@@ -915,11 +853,11 @@ class _RichTextSanitizer(HTMLParser):
         if tag in ('script', 'style'):
             self._drop_depth += 1
             return
-        if self._drop_depth or tag not in IDEAS_ALLOWED_TAGS:
+        if self._drop_depth or tag not in PROJECTS_ALLOWED_TAGS:
             return
         if tag == 'a':
             href = dict(attrs).get('href', '')
-            if IDEAS_LINK_SCHEME_RE.match(href):
+            if PROJECTS_LINK_SCHEME_RE.match(href):
                 safe_href = html_lib.escape(href, quote=True)
                 self.out.append(f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">')
             else:
@@ -928,14 +866,14 @@ class _RichTextSanitizer(HTMLParser):
             self.out.append(f'<{tag}>')
 
     def handle_startendtag(self, tag, attrs):
-        if tag in IDEAS_VOID_TAGS and not self._drop_depth:
+        if tag in PROJECTS_VOID_TAGS and not self._drop_depth:
             self.out.append(f'<{tag}>')
 
     def handle_endtag(self, tag):
         if tag in ('script', 'style'):
             self._drop_depth = max(0, self._drop_depth - 1)
             return
-        if self._drop_depth or tag not in IDEAS_ALLOWED_TAGS or tag in IDEAS_VOID_TAGS:
+        if self._drop_depth or tag not in PROJECTS_ALLOWED_TAGS or tag in PROJECTS_VOID_TAGS:
             return
         self.out.append(f'</{tag}>')
 
@@ -951,8 +889,8 @@ def sanitize_rich_text(raw):
     return ''.join(parser.out)
 
 
-def init_ideas_db():
-    con = sqlite3.connect(IDEAS_DB_PATH)
+def init_projects_db():
+    con = sqlite3.connect(PROJECTS_DB_PATH)
     con.executescript("""
         CREATE TABLE IF NOT EXISTS cards (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -960,6 +898,7 @@ def init_ideas_db():
             list_name         TEXT NOT NULL CHECK(list_name IN ('backlog', 'current')),
             position          INTEGER NOT NULL,
             description_html  TEXT NOT NULL DEFAULT '',
+            tag               TEXT,
             created_at        TEXT NOT NULL,
             updated_at        TEXT NOT NULL
         );
@@ -971,19 +910,25 @@ def init_ideas_db():
             position  INTEGER NOT NULL
         );
     """)
+    try:
+        # Migration for DBs created before the tag column existed; harmless
+        # no-op (caught below) on a fresh DB where CREATE TABLE already added it.
+        con.execute('ALTER TABLE cards ADD COLUMN tag TEXT')
+    except sqlite3.OperationalError:
+        pass
     con.commit()
     con.close()
 
 
-def _ideas_con():
-    con = sqlite3.connect(IDEAS_DB_PATH)
+def _projects_con():
+    con = sqlite3.connect(PROJECTS_DB_PATH)
     con.execute('PRAGMA foreign_keys = ON')
     con.row_factory = sqlite3.Row
     return con
 
 
-def get_ideas_board():
-    con = _ideas_con()
+def get_projects_board():
+    con = _projects_con()
     cards = con.execute('SELECT * FROM cards ORDER BY list_name, position').fetchall()
     todo_rows = con.execute('SELECT * FROM todo_items ORDER BY card_id, position').fetchall()
     con.close()
@@ -994,13 +939,14 @@ def get_ideas_board():
             'id': t['id'], 'text': t['text'], 'checked': bool(t['checked']),
         })
 
-    board = {name: [] for name in IDEAS_LISTS}
+    board = {name: [] for name in PROJECTS_LISTS}
     for c in cards:
         items = todos_by_card.get(c['id'], [])
         board[c['list_name']].append({
             'id':               c['id'],
             'title':            c['title'],
             'description_html': c['description_html'],
+            'tag':              c['tag'],
             'todo_items':       items,
             'done_count':       sum(1 for i in items if i['checked']),
             'total_count':      len(items),
@@ -1008,16 +954,17 @@ def get_ideas_board():
     return board
 
 
-def create_idea_card(title, list_name):
+def create_project_card(title, list_name, tag=None):
     now = datetime.now().isoformat(timespec='seconds')
-    con = _ideas_con()
+    tag = tag if tag in PROJECT_TAGS else None
+    con = _projects_con()
     pos = con.execute(
         'SELECT COALESCE(MAX(position), -1) + 1 p FROM cards WHERE list_name=?', (list_name,)
     ).fetchone()['p']
     cur = con.execute(
-        'INSERT INTO cards (title, list_name, position, description_html, created_at, updated_at) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
-        (title, list_name, pos, '', now, now),
+        'INSERT INTO cards (title, list_name, position, description_html, tag, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (title, list_name, pos, '', tag, now, now),
     )
     con.commit()
     new_id = cur.lastrowid
@@ -1025,7 +972,7 @@ def create_idea_card(title, list_name):
     return new_id
 
 
-def update_idea_card(card_id, title=None, description_html=None):
+def update_project_card(card_id, title=None, description_html=None, tag=_UNSET):
     fields, values = [], []
     if title is not None:
         fields.append('title = ?')
@@ -1033,12 +980,15 @@ def update_idea_card(card_id, title=None, description_html=None):
     if description_html is not None:
         fields.append('description_html = ?')
         values.append(sanitize_rich_text(description_html))
+    if tag is not _UNSET:
+        fields.append('tag = ?')
+        values.append(tag if tag in PROJECT_TAGS else None)
     if not fields:
         return
     fields.append('updated_at = ?')
     values.append(datetime.now().isoformat(timespec='seconds'))
     values.append(card_id)
-    con = _ideas_con()
+    con = _projects_con()
     con.execute(f'UPDATE cards SET {", ".join(fields)} WHERE id = ?', values)
     con.commit()
     con.close()
@@ -1052,8 +1002,8 @@ def _renumber_list(con, list_name):
         con.execute('UPDATE cards SET position = ? WHERE id = ?', (i, cid))
 
 
-def move_idea_card(card_id, list_name, before_id=None):
-    con = _ideas_con()
+def move_project_card(card_id, list_name, before_id=None):
+    con = _projects_con()
     row = con.execute('SELECT list_name FROM cards WHERE id = ?', (card_id,)).fetchone()
     if row is None:
         con.close()
@@ -1076,8 +1026,8 @@ def move_idea_card(card_id, list_name, before_id=None):
     con.close()
 
 
-def delete_idea_card(card_id):
-    con = _ideas_con()
+def delete_project_card(card_id):
+    con = _projects_con()
     row = con.execute('SELECT list_name FROM cards WHERE id = ?', (card_id,)).fetchone()
     con.execute('DELETE FROM cards WHERE id = ?', (card_id,))
     if row:
@@ -1086,8 +1036,8 @@ def delete_idea_card(card_id):
     con.close()
 
 
-def create_idea_todo(card_id, text):
-    con = _ideas_con()
+def create_project_todo(card_id, text):
+    con = _projects_con()
     pos = con.execute(
         'SELECT COALESCE(MAX(position), -1) + 1 p FROM todo_items WHERE card_id = ?', (card_id,)
     ).fetchone()['p']
@@ -1101,7 +1051,7 @@ def create_idea_todo(card_id, text):
     return new_id
 
 
-def update_idea_todo(todo_id, text=None, checked=None):
+def update_project_todo(todo_id, text=None, checked=None):
     fields, values = [], []
     if text is not None:
         fields.append('text = ?')
@@ -1112,25 +1062,46 @@ def update_idea_todo(todo_id, text=None, checked=None):
     if not fields:
         return
     values.append(todo_id)
-    con = _ideas_con()
+    con = _projects_con()
     con.execute(f'UPDATE todo_items SET {", ".join(fields)} WHERE id = ?', values)
     con.commit()
     con.close()
 
 
-def delete_idea_todo(todo_id):
-    con = _ideas_con()
+def delete_project_todo(todo_id):
+    con = _projects_con()
     con.execute('DELETE FROM todo_items WHERE id = ?', (todo_id,))
     con.commit()
     con.close()
 
 
-init_ideas_db()
+def move_project_todo(todo_id, before_id=None):
+    """Reorders a to-do item within its own card's list -- unlike cards, to-do
+    items never move between parents via drag-and-drop, so this only ever
+    touches one card_id's rows."""
+    con = _projects_con()
+    row = con.execute('SELECT card_id FROM todo_items WHERE id = ?', (todo_id,)).fetchone()
+    if row is None:
+        con.close()
+        return
+    card_id = row['card_id']
+    ids = [r['id'] for r in con.execute(
+        'SELECT id FROM todo_items WHERE card_id = ? AND id != ? ORDER BY position',
+        (card_id, todo_id),
+    ).fetchall()]
+    idx = ids.index(before_id) if before_id in ids else len(ids)
+    ids.insert(idx, todo_id)
+    for i, tid in enumerate(ids):
+        con.execute('UPDATE todo_items SET position = ? WHERE id = ?', (i, tid))
+    con.commit()
+    con.close()
+
+
+init_projects_db()
 
 
 def build_dashboard():
     return {
-        'project_todos': get_project_todos(),
         'bluesky_followers': get_bluesky_followers(),
         'site_traffic': get_site_traffic(),
         'security': get_security_findings(),
@@ -1157,81 +1128,95 @@ def api_data():
     return jsonify(build_dashboard())
 
 
-@app.route('/ideas')
-def ideas_page():
+@app.route('/projects')
+def projects_page():
     if not authed():
         return redirect(url_for('login'))
-    return render_template('ideas.html', board=get_ideas_board())
+    return render_template('projects.html', board=get_projects_board())
 
 
-@app.route('/api/ideas/cards', methods=['POST'])
-def api_ideas_create_card():
+@app.route('/api/projects/cards', methods=['POST'])
+def api_projects_create_card():
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True, silent=True) or {}
     title = (data.get('title') or '').strip()
     list_name = data.get('list_name')
-    if not title or list_name not in IDEAS_LISTS:
+    if not title or list_name not in PROJECTS_LISTS:
         return jsonify({'error': 'invalid'}), 400
-    card_id = create_idea_card(title, list_name)
+    card_id = create_project_card(title, list_name, tag=data.get('tag'))
     return jsonify({'id': card_id})
 
 
-@app.route('/api/ideas/cards/<int:card_id>', methods=['PATCH'])
-def api_ideas_update_card(card_id):
+@app.route('/api/projects/cards/<int:card_id>', methods=['PATCH'])
+def api_projects_update_card(card_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True, silent=True) or {}
-    update_idea_card(card_id, title=data.get('title'), description_html=data.get('description_html'))
+    # 'tag' is treated as _UNSET unless the key was actually sent, so a client
+    # can explicitly clear it (tag: null/'') without every other PATCH wiping it.
+    kwargs = {'title': data.get('title'), 'description_html': data.get('description_html')}
+    if 'tag' in data:
+        kwargs['tag'] = data['tag']
+    update_project_card(card_id, **kwargs)
     return jsonify({'ok': True})
 
 
-@app.route('/api/ideas/cards/<int:card_id>', methods=['DELETE'])
-def api_ideas_delete_card(card_id):
+@app.route('/api/projects/cards/<int:card_id>', methods=['DELETE'])
+def api_projects_delete_card(card_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
-    delete_idea_card(card_id)
+    delete_project_card(card_id)
     return jsonify({'ok': True})
 
 
-@app.route('/api/ideas/cards/<int:card_id>/move', methods=['POST'])
-def api_ideas_move_card(card_id):
+@app.route('/api/projects/cards/<int:card_id>/move', methods=['POST'])
+def api_projects_move_card(card_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True, silent=True) or {}
     list_name = data.get('list_name')
-    if list_name not in IDEAS_LISTS:
+    if list_name not in PROJECTS_LISTS:
         return jsonify({'error': 'invalid'}), 400
-    move_idea_card(card_id, list_name, before_id=data.get('before_id'))
+    move_project_card(card_id, list_name, before_id=data.get('before_id'))
     return jsonify({'ok': True})
 
 
-@app.route('/api/ideas/cards/<int:card_id>/todos', methods=['POST'])
-def api_ideas_create_todo(card_id):
+@app.route('/api/projects/cards/<int:card_id>/todos', methods=['POST'])
+def api_projects_create_todo(card_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True, silent=True) or {}
     text = (data.get('text') or '').strip()
     if not text:
         return jsonify({'error': 'invalid'}), 400
-    todo_id = create_idea_todo(card_id, text)
+    todo_id = create_project_todo(card_id, text)
     return jsonify({'id': todo_id})
 
 
-@app.route('/api/ideas/todos/<int:todo_id>', methods=['PATCH'])
-def api_ideas_update_todo(todo_id):
+@app.route('/api/projects/todos/<int:todo_id>', methods=['PATCH'])
+def api_projects_update_todo(todo_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True, silent=True) or {}
-    update_idea_todo(todo_id, text=data.get('text'), checked=data.get('checked'))
+    update_project_todo(todo_id, text=data.get('text'), checked=data.get('checked'))
     return jsonify({'ok': True})
 
 
-@app.route('/api/ideas/todos/<int:todo_id>', methods=['DELETE'])
-def api_ideas_delete_todo(todo_id):
+@app.route('/api/projects/todos/<int:todo_id>', methods=['DELETE'])
+def api_projects_delete_todo(todo_id):
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
-    delete_idea_todo(todo_id)
+    delete_project_todo(todo_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/projects/todos/<int:todo_id>/move', methods=['POST'])
+def api_projects_move_todo(todo_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    move_project_todo(todo_id, before_id=data.get('before_id'))
     return jsonify({'ok': True})
 
 
