@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ideas Board — Dave's Server</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; height: 100vh; overflow: hidden; }
+    h1 { font-size: 1.3rem; color: #eee; margin-bottom: 1rem; }
+    .nav { float: right; font-size: .85rem; display: flex; align-items: center; gap: 1rem; }
+    .nav a { color: #ddd; text-decoration: none; }
+    .nav a:hover { color: #fff; }
+    .empty { color: #999; font-size: .9rem; padding: .5rem 0; }
+
+    .board {
+      display: grid;
+      grid-template-columns: 300px 300px 1fr;
+      gap: 1rem;
+      height: calc(100vh - 4.5rem);
+    }
+    .board-col, .detail-pane {
+      background: #272727; border-radius: 6px; padding: .85rem;
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .board-col h2, .detail-pane h2 {
+      font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em;
+      margin-bottom: .75rem; flex-shrink: 0;
+    }
+    .card-list {
+      flex: 1; overflow-y: auto; min-height: 2rem;
+      display: flex; flex-direction: column; gap: .5rem;
+    }
+    .card-list.drag-over { background: #2a2a2a; border-radius: 6px; }
+
+    .idea-card {
+      background: #313131; border: 1px solid #3a3a3a; border-radius: 5px;
+      padding: .55rem .7rem; cursor: grab; font-size: .9rem;
+    }
+    .idea-card:hover { border-color: #4a4a4a; }
+    .idea-card.selected { border-color: #69c; background: #2a3340; }
+    .idea-card.dragging { opacity: .35; }
+    .idea-card-title { color: #ddd; word-break: break-word; }
+    .idea-card-meta { color: #888; font-size: .78rem; margin-top: .25rem; }
+
+    .new-card-form { display: flex; gap: .4rem; margin-top: .65rem; flex-shrink: 0; }
+    .new-card-form input {
+      flex: 1; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 4px;
+      color: #ddd; font-size: .85rem; padding: .4rem .55rem;
+    }
+    .new-card-form input:focus { outline: none; border-color: #69c; }
+    .new-card-form button, .icon-btn {
+      background: #2e2e2e; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      cursor: pointer; font-size: .85rem; padding: .4rem .7rem;
+    }
+    .new-card-form button:hover, .icon-btn:hover { background: #363636; border-color: #555; }
+
+    .detail-pane { overflow-y: auto; }
+    .detail-header { display: flex; align-items: flex-start; gap: .5rem; margin-bottom: .75rem; }
+    .detail-title {
+      flex: 1; background: transparent; border: 1px solid transparent; border-radius: 4px;
+      color: #eee; font-size: 1.1rem; font-weight: 600; padding: .3rem .4rem; font-family: inherit;
+    }
+    .detail-title:hover { border-color: #3a3a3a; }
+    .detail-title:focus { outline: none; border-color: #69c; background: #1e1e1e; }
+    .delete-card-btn { color: #e55; border-color: #4a2a2a; }
+    .delete-card-btn:hover { background: #3a1a1a; border-color: #5a3a3a; }
+
+    .rt-toolbar { display: flex; gap: .3rem; margin-bottom: .4rem; }
+    .rt-toolbar button {
+      background: #2e2e2e; color: #ccc; border: 1px solid #3a3a3a; border-radius: 4px;
+      cursor: pointer; font-size: .8rem; width: 1.9rem; height: 1.9rem; font-family: inherit;
+    }
+    .rt-toolbar button:hover { background: #363636; border-color: #555; }
+    .rt-editor {
+      background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 5px;
+      padding: .6rem .7rem; font-size: .88rem; line-height: 1.5; min-height: 6rem;
+      color: #ccc;
+    }
+    .rt-editor:focus { outline: none; border-color: #69c; }
+    .rt-editor a { color: #9cf; }
+    .rt-editor ul, .rt-editor ol { padding-left: 1.3rem; }
+    .rt-editor:empty::before { content: 'Click to add a description…'; color: #666; }
+
+    .todo-section { margin-top: 1.1rem; }
+    .todo-section h3 {
+      font-size: .78rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .5rem;
+    }
+    .todo-list { list-style: none; display: flex; flex-direction: column; gap: .3rem; margin-bottom: .5rem; }
+    .todo-item { display: flex; align-items: center; gap: .5rem; font-size: .88rem; }
+    .todo-item input[type=checkbox] { accent-color: #6d6; width: 1rem; height: 1rem; flex-shrink: 0; }
+    .todo-item .todo-text { flex: 1; word-break: break-word; }
+    .todo-item.checked .todo-text { color: #777; text-decoration: line-through; }
+    .todo-item .icon-btn { padding: .15rem .5rem; font-size: .75rem; }
+    .todo-add-form { display: flex; gap: .4rem; }
+    .todo-add-form input {
+      flex: 1; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 4px;
+      color: #ddd; font-size: .85rem; padding: .4rem .55rem;
+    }
+    .todo-add-form input:focus { outline: none; border-color: #69c; }
+  </style>
+</head>
+<body>
+  <h1>Ideas Board
+    <span class="nav">
+      <a href="/">&larr; Dashboard</a>
+      <a href="/logout">Log out</a>
+    </span>
+  </h1>
+
+  <div class="board">
+    <section class="board-col">
+      <h2>Backlog</h2>
+      <div class="card-list" id="list-backlog" data-list="backlog"></div>
+      <form class="new-card-form" data-list="backlog">
+        <input type="text" placeholder="New idea…" required>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="board-col">
+      <h2>Current projects</h2>
+      <div class="card-list" id="list-current" data-list="current"></div>
+      <form class="new-card-form" data-list="current">
+        <input type="text" placeholder="New idea…" required>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="detail-pane" id="detail-pane">
+      <p class="empty">Select a card to see its details.</p>
+    </section>
+  </div>
+
+  <script id="board-data" type="application/json">{{ board | tojson }}</script>
+  <script>
+(function () {
+  const board = JSON.parse(document.getElementById('board-data').textContent);
+  const cardsById = {};
+  for (const list of Object.keys(board)) {
+    for (const card of board[list]) cardsById[card.id] = { ...card, list_name: list };
+  }
+  let selectedId = null;
+
+  const listEls = {
+    backlog: document.getElementById('list-backlog'),
+    current: document.getElementById('list-current'),
+  };
+  const detailPane = document.getElementById('detail-pane');
+
+  function api(url, opts) {
+    return fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+    }).then(r => {
+      if (!r.ok) throw new Error('request failed: ' + r.status);
+      return r.status === 204 ? null : r.json();
+    });
+  }
+
+  function cardMeta(card) {
+    return card.total_count > 0 ? `${card.done_count}/${card.total_count} done` : '';
+  }
+
+  function renderCardElement(card) {
+    const el = document.createElement('div');
+    el.className = 'idea-card' + (card.id === selectedId ? ' selected' : '');
+    el.dataset.id = card.id;
+    el.draggable = true;
+
+    const title = document.createElement('div');
+    title.className = 'idea-card-title';
+    title.textContent = card.title;
+    el.appendChild(title);
+
+    const meta = cardMeta(card);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'idea-card-meta';
+      metaEl.textContent = meta;
+      el.appendChild(metaEl);
+    }
+
+    el.addEventListener('click', () => selectCard(card.id));
+    el.addEventListener('dragstart', () => {
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+    });
+
+    return el;
+  }
+
+  function renderList(listName) {
+    const el = listEls[listName];
+    el.innerHTML = '';
+    for (const card of board[listName]) {
+      el.appendChild(renderCardElement(card));
+    }
+  }
+
+  function renderAllLists() {
+    renderList('backlog');
+    renderList('current');
+  }
+
+  function updateCardBadge(cardId) {
+    const card = cardsById[cardId];
+    const el = listEls[card.list_name].querySelector(`.idea-card[data-id="${cardId}"]`);
+    if (!el) return;
+    let metaEl = el.querySelector('.idea-card-meta');
+    const meta = cardMeta(card);
+    if (meta && !metaEl) {
+      metaEl = document.createElement('div');
+      metaEl.className = 'idea-card-meta';
+      el.appendChild(metaEl);
+    }
+    if (metaEl) metaEl.textContent = meta;
+    if (metaEl && !meta) metaEl.remove();
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function renderDetail(cardId) {
+    const card = cardsById[cardId];
+    if (!card) {
+      detailPane.innerHTML = '<p class="empty">Select a card to see its details.</p>';
+      return;
+    }
+
+    detailPane.innerHTML = `
+      <div class="detail-header">
+        <input type="text" class="detail-title" id="detail-title" value="${escapeHtml(card.title)}">
+        <button class="icon-btn delete-card-btn" id="delete-card-btn" title="Delete card">Delete</button>
+      </div>
+      <div class="rt-toolbar">
+        <button type="button" data-cmd="bold"><b>B</b></button>
+        <button type="button" data-cmd="italic"><i>I</i></button>
+        <button type="button" data-cmd="underline"><u>U</u></button>
+        <button type="button" data-cmd="insertUnorderedList">&bull;</button>
+        <button type="button" data-cmd="link">&#128279;</button>
+        <button type="button" data-cmd="unlink">&#9587;</button>
+      </div>
+      <div class="rt-editor" id="rt-editor" contenteditable="true">${card.description_html}</div>
+
+      <div class="todo-section">
+        <h3>To-do</h3>
+        <ul class="todo-list" id="todo-list"></ul>
+        <form class="todo-add-form" id="todo-add-form">
+          <input type="text" placeholder="Add an item…" required>
+          <button type="submit" class="new-card-form-btn">Add</button>
+        </form>
+      </div>
+    `;
+
+    document.getElementById('detail-title').addEventListener('blur', onTitleBlur);
+    document.getElementById('delete-card-btn').addEventListener('click', onDeleteCard);
+    document.getElementById('rt-editor').addEventListener('blur', onDescriptionBlur);
+    detailPane.querySelectorAll('.rt-toolbar button').forEach(btn => {
+      btn.addEventListener('click', () => runRichTextCmd(btn.dataset.cmd));
+    });
+    document.getElementById('todo-add-form').addEventListener('submit', onAddTodo);
+
+    renderTodoList(card);
+  }
+
+  function renderTodoList(card) {
+    const ul = document.getElementById('todo-list');
+    if (!ul) return;
+    ul.innerHTML = '';
+    for (const item of card.todo_items) {
+      const li = document.createElement('li');
+      li.className = 'todo-item' + (item.checked ? ' checked' : '');
+      li.dataset.id = item.id;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = item.checked;
+      cb.addEventListener('change', () => onToggleTodo(card.id, item.id, cb.checked));
+
+      const span = document.createElement('span');
+      span.className = 'todo-text';
+      span.textContent = item.text;
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'icon-btn';
+      del.textContent = '✕';
+      del.addEventListener('click', () => onDeleteTodo(card.id, item.id));
+
+      li.append(cb, span, del);
+      ul.appendChild(li);
+    }
+  }
+
+  function selectCard(id) {
+    selectedId = id;
+    document.querySelectorAll('.idea-card').forEach(el => {
+      el.classList.toggle('selected', Number(el.dataset.id) === id);
+    });
+    renderDetail(id);
+  }
+
+  function runRichTextCmd(cmd) {
+    const editor = document.getElementById('rt-editor');
+    editor.focus();
+    if (cmd === 'link') {
+      let url = prompt('Link URL:');
+      if (!url) return;
+      if (!/^(https?:|mailto:)/i.test(url)) url = 'https://' + url;
+      document.execCommand('createLink', false, url);
+    } else {
+      document.execCommand(cmd, false, null);
+    }
+  }
+
+  function onTitleBlur(e) {
+    const card = cardsById[selectedId];
+    const newTitle = e.target.value.trim();
+    if (!newTitle || newTitle === card.title) {
+      e.target.value = card.title;
+      return;
+    }
+    card.title = newTitle;
+    api(`/api/ideas/cards/${card.id}`, { method: 'PATCH', body: JSON.stringify({ title: newTitle }) })
+      .catch(console.error);
+    const el = listEls[card.list_name].querySelector(`.idea-card[data-id="${card.id}"] .idea-card-title`);
+    if (el) el.textContent = newTitle;
+  }
+
+  function onDescriptionBlur(e) {
+    const card = cardsById[selectedId];
+    if (!card) return;
+    const newHtml = e.target.innerHTML;
+    if (newHtml === card.description_html) return;
+    card.description_html = newHtml;
+    api(`/api/ideas/cards/${card.id}`, { method: 'PATCH', body: JSON.stringify({ description_html: newHtml }) })
+      .catch(console.error);
+  }
+
+  function onDeleteCard() {
+    const card = cardsById[selectedId];
+    if (!card) return;
+    if (!confirm(`Delete "${card.title}" and its to-do list? This can't be undone.`)) return;
+    api(`/api/ideas/cards/${card.id}`, { method: 'DELETE' })
+      .then(() => {
+        board[card.list_name] = board[card.list_name].filter(c => c.id !== card.id);
+        delete cardsById[card.id];
+        selectedId = null;
+        renderAllLists();
+        renderDetail(null);
+      })
+      .catch(console.error);
+  }
+
+  function onAddTodo(e) {
+    e.preventDefault();
+    const input = e.target.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    const card = cardsById[selectedId];
+    api(`/api/ideas/cards/${card.id}/todos`, { method: 'POST', body: JSON.stringify({ text }) })
+      .then(({ id }) => {
+        card.todo_items.push({ id, text, checked: false });
+        card.total_count = card.todo_items.length;
+        card.done_count = card.todo_items.filter(i => i.checked).length;
+        input.value = '';
+        renderTodoList(card);
+        updateCardBadge(card.id);
+      })
+      .catch(console.error);
+  }
+
+  function onToggleTodo(cardId, todoId, checked) {
+    const card = cardsById[cardId];
+    api(`/api/ideas/todos/${todoId}`, { method: 'PATCH', body: JSON.stringify({ checked }) })
+      .then(() => {
+        const item = card.todo_items.find(i => i.id === todoId);
+        item.checked = checked;
+        card.done_count = card.todo_items.filter(i => i.checked).length;
+        renderTodoList(card);
+        updateCardBadge(card.id);
+      })
+      .catch(console.error);
+  }
+
+  function onDeleteTodo(cardId, todoId) {
+    const card = cardsById[cardId];
+    api(`/api/ideas/todos/${todoId}`, { method: 'DELETE' })
+      .then(() => {
+        card.todo_items = card.todo_items.filter(i => i.id !== todoId);
+        card.total_count = card.todo_items.length;
+        card.done_count = card.todo_items.filter(i => i.checked).length;
+        renderTodoList(card);
+        updateCardBadge(card.id);
+      })
+      .catch(console.error);
+  }
+
+  document.querySelectorAll('.new-card-form').forEach(form => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = form.querySelector('input');
+      const title = input.value.trim();
+      const listName = form.dataset.list;
+      if (!title) return;
+      api('/api/ideas/cards', { method: 'POST', body: JSON.stringify({ title, list_name: listName }) })
+        .then(({ id }) => {
+          const card = {
+            id, title, description_html: '', todo_items: [],
+            done_count: 0, total_count: 0, list_name: listName,
+          };
+          cardsById[id] = card;
+          board[listName].push(card);
+          input.value = '';
+          renderList(listName);
+        })
+        .catch(console.error);
+    });
+  });
+
+  // ── Drag and drop between/within columns ──
+  function getDragAfterElement(container, y) {
+    const els = [...container.querySelectorAll('.idea-card:not(.dragging)')];
+    return els.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) return { offset, element: child };
+      return closest;
+    }, { offset: -Infinity, element: null }).element;
+  }
+
+  Object.values(listEls).forEach(container => {
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const dragging = document.querySelector('.idea-card.dragging');
+      if (!dragging) return;
+      const after = getDragAfterElement(container, e.clientY);
+      if (after == null) container.appendChild(dragging);
+      else container.insertBefore(dragging, after);
+    });
+
+    container.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const dragging = document.querySelector('.idea-card.dragging');
+      if (!dragging) return;
+      const cardId = Number(dragging.dataset.id);
+      const listName = container.dataset.list;
+      const siblings = [...container.children];
+      const idx = siblings.indexOf(dragging);
+      const beforeEl = siblings[idx + 1];
+      const beforeId = beforeEl ? Number(beforeEl.dataset.id) : null;
+
+      const card = cardsById[cardId];
+      const oldList = card.list_name;
+      board[oldList] = board[oldList].filter(c => c.id !== cardId);
+      card.list_name = listName;
+      const insertAt = beforeId != null ? board[listName].findIndex(c => c.id === beforeId) : board[listName].length;
+      board[listName].splice(insertAt < 0 ? board[listName].length : insertAt, 0, card);
+
+      api(`/api/ideas/cards/${cardId}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ list_name: listName, before_id: beforeId }),
+      }).catch(console.error);
+    });
+  });
+
+  renderAllLists();
+})();
+  </script>
+</body>
+</html>

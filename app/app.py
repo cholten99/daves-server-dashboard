@@ -1,5 +1,6 @@
 import gzip
 import glob
+import html as html_lib
 import http.cookiejar
 import json
 import os
@@ -11,6 +12,7 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 
 from guessit import guessit as _guessit
 from flask import Flask, request, redirect, url_for, render_template, make_response, jsonify
@@ -91,6 +93,13 @@ _mr_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_mr_
 SECURITY_DAYS = 6
 BACKUP_RUNS_LIMIT = 10
 HD1_PREFIX = '/mnt/portable1'
+
+# Ideas board: coding-project / paper / blog-post ideas, tracked as a small
+# two-column Trello-like board (backlog -> current) rather than a hand-edited
+# TODO.md like PROJECT_TODOS above. This app owns the schema outright (unlike
+# the read-only DBs elsewhere in this file), so it creates it on load.
+IDEAS_DB_PATH = os.path.join(os.path.dirname(__file__), 'ideas.db')
+IDEAS_LISTS = ('backlog', 'current')
 
 SEVERITY_RANK = {'CRITICAL': 3, 'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
 
@@ -879,6 +888,246 @@ def get_project_todos():
     return projects
 
 
+# ── Ideas board ──────────────────────────────────────────────────────────────
+
+IDEAS_ALLOWED_TAGS = {
+    'p', 'br', 'div', 'span', 'b', 'strong', 'i', 'em', 'u', 's', 'strike',
+    'ul', 'ol', 'li', 'a', 'blockquote', 'code', 'pre',
+}
+IDEAS_VOID_TAGS = {'br'}
+IDEAS_LINK_SCHEME_RE = re.compile(r'^(https?:|mailto:)', re.I)
+
+
+class _RichTextSanitizer(HTMLParser):
+    """Whitelist-based cleaner for card description HTML saved from the
+    contenteditable editor. Runs server-side even with a single user, since
+    browser-generated markup (execCommand output, pasted content) isn't
+    otherwise trustworthy input to store and later re-render as raw HTML.
+    Strips every attribute except href on <a>, and drops disallowed tags
+    while keeping their text content (script/style content is dropped too)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self._drop_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style'):
+            self._drop_depth += 1
+            return
+        if self._drop_depth or tag not in IDEAS_ALLOWED_TAGS:
+            return
+        if tag == 'a':
+            href = dict(attrs).get('href', '')
+            if IDEAS_LINK_SCHEME_RE.match(href):
+                safe_href = html_lib.escape(href, quote=True)
+                self.out.append(f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">')
+            else:
+                self.out.append('<a>')
+        else:
+            self.out.append(f'<{tag}>')
+
+    def handle_startendtag(self, tag, attrs):
+        if tag in IDEAS_VOID_TAGS and not self._drop_depth:
+            self.out.append(f'<{tag}>')
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style'):
+            self._drop_depth = max(0, self._drop_depth - 1)
+            return
+        if self._drop_depth or tag not in IDEAS_ALLOWED_TAGS or tag in IDEAS_VOID_TAGS:
+            return
+        self.out.append(f'</{tag}>')
+
+    def handle_data(self, data):
+        if not self._drop_depth:
+            self.out.append(html_lib.escape(data))
+
+
+def sanitize_rich_text(raw):
+    parser = _RichTextSanitizer()
+    parser.feed(raw or '')
+    parser.close()
+    return ''.join(parser.out)
+
+
+def init_ideas_db():
+    con = sqlite3.connect(IDEAS_DB_PATH)
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS cards (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            title             TEXT NOT NULL,
+            list_name         TEXT NOT NULL CHECK(list_name IN ('backlog', 'current')),
+            position          INTEGER NOT NULL,
+            description_html  TEXT NOT NULL DEFAULT '',
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS todo_items (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id   INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            text      TEXT NOT NULL,
+            checked   INTEGER NOT NULL DEFAULT 0,
+            position  INTEGER NOT NULL
+        );
+    """)
+    con.commit()
+    con.close()
+
+
+def _ideas_con():
+    con = sqlite3.connect(IDEAS_DB_PATH)
+    con.execute('PRAGMA foreign_keys = ON')
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def get_ideas_board():
+    con = _ideas_con()
+    cards = con.execute('SELECT * FROM cards ORDER BY list_name, position').fetchall()
+    todo_rows = con.execute('SELECT * FROM todo_items ORDER BY card_id, position').fetchall()
+    con.close()
+
+    todos_by_card = {}
+    for t in todo_rows:
+        todos_by_card.setdefault(t['card_id'], []).append({
+            'id': t['id'], 'text': t['text'], 'checked': bool(t['checked']),
+        })
+
+    board = {name: [] for name in IDEAS_LISTS}
+    for c in cards:
+        items = todos_by_card.get(c['id'], [])
+        board[c['list_name']].append({
+            'id':               c['id'],
+            'title':            c['title'],
+            'description_html': c['description_html'],
+            'todo_items':       items,
+            'done_count':       sum(1 for i in items if i['checked']),
+            'total_count':      len(items),
+        })
+    return board
+
+
+def create_idea_card(title, list_name):
+    now = datetime.now().isoformat(timespec='seconds')
+    con = _ideas_con()
+    pos = con.execute(
+        'SELECT COALESCE(MAX(position), -1) + 1 p FROM cards WHERE list_name=?', (list_name,)
+    ).fetchone()['p']
+    cur = con.execute(
+        'INSERT INTO cards (title, list_name, position, description_html, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (title, list_name, pos, '', now, now),
+    )
+    con.commit()
+    new_id = cur.lastrowid
+    con.close()
+    return new_id
+
+
+def update_idea_card(card_id, title=None, description_html=None):
+    fields, values = [], []
+    if title is not None:
+        fields.append('title = ?')
+        values.append(title)
+    if description_html is not None:
+        fields.append('description_html = ?')
+        values.append(sanitize_rich_text(description_html))
+    if not fields:
+        return
+    fields.append('updated_at = ?')
+    values.append(datetime.now().isoformat(timespec='seconds'))
+    values.append(card_id)
+    con = _ideas_con()
+    con.execute(f'UPDATE cards SET {", ".join(fields)} WHERE id = ?', values)
+    con.commit()
+    con.close()
+
+
+def _renumber_list(con, list_name):
+    ids = [r['id'] for r in con.execute(
+        'SELECT id FROM cards WHERE list_name = ? ORDER BY position', (list_name,)
+    ).fetchall()]
+    for i, cid in enumerate(ids):
+        con.execute('UPDATE cards SET position = ? WHERE id = ?', (i, cid))
+
+
+def move_idea_card(card_id, list_name, before_id=None):
+    con = _ideas_con()
+    row = con.execute('SELECT list_name FROM cards WHERE id = ?', (card_id,)).fetchone()
+    if row is None:
+        con.close()
+        return
+    old_list = row['list_name']
+
+    target_ids = [r['id'] for r in con.execute(
+        'SELECT id FROM cards WHERE list_name = ? AND id != ? ORDER BY position',
+        (list_name, card_id),
+    ).fetchall()]
+    idx = target_ids.index(before_id) if before_id in target_ids else len(target_ids)
+    target_ids.insert(idx, card_id)
+    for i, cid in enumerate(target_ids):
+        con.execute('UPDATE cards SET list_name = ?, position = ? WHERE id = ?', (list_name, i, cid))
+
+    if old_list != list_name:
+        _renumber_list(con, old_list)
+
+    con.commit()
+    con.close()
+
+
+def delete_idea_card(card_id):
+    con = _ideas_con()
+    row = con.execute('SELECT list_name FROM cards WHERE id = ?', (card_id,)).fetchone()
+    con.execute('DELETE FROM cards WHERE id = ?', (card_id,))
+    if row:
+        _renumber_list(con, row['list_name'])
+    con.commit()
+    con.close()
+
+
+def create_idea_todo(card_id, text):
+    con = _ideas_con()
+    pos = con.execute(
+        'SELECT COALESCE(MAX(position), -1) + 1 p FROM todo_items WHERE card_id = ?', (card_id,)
+    ).fetchone()['p']
+    cur = con.execute(
+        'INSERT INTO todo_items (card_id, text, checked, position) VALUES (?, ?, 0, ?)',
+        (card_id, text, pos),
+    )
+    con.commit()
+    new_id = cur.lastrowid
+    con.close()
+    return new_id
+
+
+def update_idea_todo(todo_id, text=None, checked=None):
+    fields, values = [], []
+    if text is not None:
+        fields.append('text = ?')
+        values.append(text)
+    if checked is not None:
+        fields.append('checked = ?')
+        values.append(1 if checked else 0)
+    if not fields:
+        return
+    values.append(todo_id)
+    con = _ideas_con()
+    con.execute(f'UPDATE todo_items SET {", ".join(fields)} WHERE id = ?', values)
+    con.commit()
+    con.close()
+
+
+def delete_idea_todo(todo_id):
+    con = _ideas_con()
+    con.execute('DELETE FROM todo_items WHERE id = ?', (todo_id,))
+    con.commit()
+    con.close()
+
+
+init_ideas_db()
+
+
 def build_dashboard():
     return {
         'project_todos': get_project_todos(),
@@ -906,6 +1155,84 @@ def api_data():
     if not authed():
         return jsonify({'error': 'forbidden'}), 403
     return jsonify(build_dashboard())
+
+
+@app.route('/ideas')
+def ideas_page():
+    if not authed():
+        return redirect(url_for('login'))
+    return render_template('ideas.html', board=get_ideas_board())
+
+
+@app.route('/api/ideas/cards', methods=['POST'])
+def api_ideas_create_card():
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    title = (data.get('title') or '').strip()
+    list_name = data.get('list_name')
+    if not title or list_name not in IDEAS_LISTS:
+        return jsonify({'error': 'invalid'}), 400
+    card_id = create_idea_card(title, list_name)
+    return jsonify({'id': card_id})
+
+
+@app.route('/api/ideas/cards/<int:card_id>', methods=['PATCH'])
+def api_ideas_update_card(card_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    update_idea_card(card_id, title=data.get('title'), description_html=data.get('description_html'))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ideas/cards/<int:card_id>', methods=['DELETE'])
+def api_ideas_delete_card(card_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    delete_idea_card(card_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ideas/cards/<int:card_id>/move', methods=['POST'])
+def api_ideas_move_card(card_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    list_name = data.get('list_name')
+    if list_name not in IDEAS_LISTS:
+        return jsonify({'error': 'invalid'}), 400
+    move_idea_card(card_id, list_name, before_id=data.get('before_id'))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ideas/cards/<int:card_id>/todos', methods=['POST'])
+def api_ideas_create_todo(card_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'error': 'invalid'}), 400
+    todo_id = create_idea_todo(card_id, text)
+    return jsonify({'id': todo_id})
+
+
+@app.route('/api/ideas/todos/<int:todo_id>', methods=['PATCH'])
+def api_ideas_update_todo(todo_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    update_idea_todo(todo_id, text=data.get('text'), checked=data.get('checked'))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ideas/todos/<int:todo_id>', methods=['DELETE'])
+def api_ideas_delete_todo(todo_id):
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    delete_idea_todo(todo_id)
+    return jsonify({'ok': True})
 
 
 @app.route('/media-resize/toggle/<name>', methods=['POST'])
