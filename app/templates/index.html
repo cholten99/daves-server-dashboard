@@ -258,22 +258,22 @@
     </div>
   </section>
 
-  <!-- ── Other Jobs ── -->
+  <!-- ── Cron Jobs ── -->
   <section>
-    <h2 class="collapsible">Other Jobs<span class="chevron">▾</span></h2>
+    <h2 class="collapsible">Cron Jobs<span class="chevron">▾</span></h2>
     <div id="jobs-content">
       <table>
         <tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
-        {% for j in other_jobs %}
+        {% for c in cron_jobs %}
         <tr>
-          <td><strong>{{ j.name }}</strong></td>
-          <td class="dim">{{ j.schedule }}</td>
-          <td class="dim">{{ timeago(j.last_run) if j.last_run else '—' }}</td>
+          <td class="file" title="{{ c.command }}">{{ c.description }}</td>
+          <td class="dim" title="{{ c.schedule }}">{{ c.schedule_human }}</td>
+          <td class="dim">{{ timeago(c.last_run) if c.last_run else '—' }}</td>
           <td>
-            {% if j.status == 'ok' %}<span class="badge badge-ok" title="{{ j.message }}">OK</span>
-            {% elif j.status == 'warning' %}<span class="badge badge-warning" title="{{ j.message }}">{{ j.message }}</span>
-            {% elif j.status == 'fail' %}<span class="badge fail" title="{{ j.message }}">Failed</span>
-            {% else %}<span class="badge badge-off" title="{{ j.message }}">Unknown</span>{% endif %}
+            {% if c.status == 'ok' %}<span class="badge badge-ok" title="{{ c.message }}">OK</span>
+            {% elif c.status == 'warning' %}<span class="badge badge-warning" title="{{ c.message }}">{{ c.message }}</span>
+            {% elif c.status == 'fail' %}<span class="badge fail" title="{{ c.message }}">Failed</span>
+            {% else %}<span class="badge badge-off" title="{{ c.message }}">Unknown</span>{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -392,13 +392,13 @@ function updateMediaResize(mr) {
 }
 function updateJobs(jobs) {
   const el = document.getElementById('jobs-content');
-  const rows = jobs.map(j => {
-    const since = j.last_run ? timeAgo(j.last_run) : '—';
-    const status = j.status === 'ok' ? `<span class="badge badge-ok" title="${j.message}">OK</span>`
-      : j.status === 'warning' ? `<span class="badge badge-warning" title="${j.message}">${j.message}</span>`
-      : j.status === 'fail' ? `<span class="badge fail" title="${j.message}">Failed</span>`
-      : `<span class="badge badge-off" title="${j.message}">Unknown</span>`;
-    return `<td><strong>${j.name}</strong></td><td class="dim">${j.schedule}</td><td class="dim">${since}</td><td>${status}</td>`;
+  const rows = jobs.map(c => {
+    const since = c.last_run ? timeAgo(c.last_run) : '—';
+    const status = c.status === 'ok' ? `<span class="badge badge-ok" title="${c.message}">OK</span>`
+      : c.status === 'warning' ? `<span class="badge badge-warning" title="${c.message}">${c.message}</span>`
+      : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
+      : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
+    return `<td class="file" title="${c.command}">${c.description}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;
   });
   el.innerHTML = tableHtml(['Job', 'Schedule', 'Last run', 'Status'], rows);
 }
@@ -411,7 +411,7 @@ function poll() {
       updateSecurity(data.security);
       updateBackups(data.backups);
       updateMediaResize(data.media_resize);
-      updateJobs(data.other_jobs);
+      updateJobs(data.cron_jobs);
       document.getElementById('pulse').classList.add('live');
     })
     .catch(() => {

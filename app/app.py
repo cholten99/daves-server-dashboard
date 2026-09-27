@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,9 +22,9 @@ PASSWORD    = os.environ.get('DASHBOARD_PASSWORD', 'watchingdaves2026')
 COOKIE_NAME = 'dsd_auth'
 COOKIE_VAL  = 'granted'
 
-FINDINGS_LOG   = '/home/dave/server-scripts/audit-findings.log'
-FINDINGS_ROTATED_GLOB = '/home/dave/server-scripts/audit-findings.log.*.gz'
-BACKUP_LOGS_DIR = '/home/dave/server-scripts/logs'
+FINDINGS_LOG   = '/home/dave/projects/server-scripts/audit-findings.log'
+FINDINGS_ROTATED_GLOB = '/home/dave/projects/server-scripts/audit-findings.log.*.gz'
+BACKUP_LOGS_DIR = '/home/dave/projects/server-scripts/logs'
 MR_DB_PATH      = '/var/www/media-resize/state.db'
 MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
@@ -41,6 +42,7 @@ SITE_TRAFFIC_SITES = [
     ('nationalstrategy.uk', 'National Strategy'),
     ('policycamp.org.uk',   'PolicyCamp'),
     ('transformgov.org.uk', 'TransformGov'),
+    ('ukgovcamp.com',       'UK Gov Camp'),
     ('ukpolyamory.org',     'UK Polyamory'),
 ]
 
@@ -68,9 +70,9 @@ _bluesky_cache = {'fetched_at': None, 'data': []}
 # TODO.md (no auto-sync script -- these are edited manually). Order here is
 # display order on the dashboard.
 PROJECT_TODOS = [
-    ('Podcast Host (Libsyn replacement)', '/var/www/podcast-host/TODO.md'),
-    ('Google Workspace Migration',        '/home/dave/google-workspace-migration/TODO.md'),
+    ('Google Workspace Migration',        '/home/dave/projects/google-workspace-migration/TODO.md'),
     ('Daves Apps Restart',                '/var/www/daves-apps/daves-apps/TODO.md'),
+    ('Notify Printer',                     '/var/www/notify-printer/TODO.md'),
 ]
 
 # media-resize already computes per-worker encode progress/ETA itself (SSH-probes
@@ -579,7 +581,7 @@ def get_media_resize_status():
     return result
 
 
-JOB_LOG_LINE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? (\w+): (.*)$')
+JOB_LOG_LINE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? (\w+)(?: [^\s:]+)?: (.*)$')
 
 
 def _last_job_status(log_path):
@@ -733,13 +735,91 @@ def get_site_traffic_detail():
     return sites
 
 
-def get_other_jobs():
+def _cron_schedule_human(schedule):
+    """Best-effort plain-English rendering of a 5-field cron schedule. Falls
+    back to the raw cron expression for anything more exotic than a fixed
+    daily/hourly time or a '*/N' step, which covers every job in dave's
+    crontab as of writing."""
+    minute, hour, dom, month, dow = schedule.split()
+    if dom == '*' and month == '*' and dow == '*':
+        if minute == '*' and hour == '*':
+            return 'Every minute'
+        if hour == '*' and minute.startswith('*/'):
+            return f'Every {minute[2:]} minutes'
+        if hour == '*' and minute.isdigit():
+            return f'Hourly at :{int(minute):02d}'
+        if hour.isdigit() and minute.isdigit():
+            return f'Daily at {int(hour):02d}:{int(minute):02d}'
+    return schedule
+
+
+# Human descriptions for known cron commands, matched by substring against
+# the full command line -- keyed on a stable bit of the path/script name so
+# unrelated flags/redirects in the crontab entry don't break the match. Log
+# path is used to show a real Last run/Status (via _last_job_status), where
+# the script actually writes timestamped 'LEVEL: message' lines; None where
+# it doesn't (or where another dashboard section -- Security audit, Backups
+# -- already covers that job's status in more detail than a one-line badge
+# could).
+CRON_JOB_INFO = [
+    # needle,                       description,                                                     log path
+    ('security-audit.sh',          'Security audit scan',                                            None),
+    ('backup.py',                  'Server backup run',                                               None),
+    ('fetch-latest-post.py',       'Fetch latest Bowsy blog post',                                    BOWSY_FEED_LOG),
+    ('site-traffic/pull_daily.py', 'Pull site traffic stats (Search Console + Cloudflare)',           '/var/www/site-traffic/logs/pull.log'),
+    ('unofficial-andy/main.py',    "Cross-post TikTok/Instagram to Bluesky ('Unofficial Andy')",      '/home/dave/projects/unofficial-andy/logs/cron.log'),
+    ('count_listens.py',           'Count podcast listens (all shows)',                               None),
+    ('sync_podcast_host.py',       'Sync TransformGov Talks podcast stats',                            None),
+    ('selfheal.py',                'Media-resize self-heal (auto-fix stuck jobs)',                     '/var/www/media-resize/logs/selfheal-cron.log'),
+    ('update_rebuild_docs.py',     'Rebuild-docs drift check (SERVER-BACKUP.md / home-pc-backup.md)',  None),
+]
+
+
+def _cron_job_info(command):
+    for needle, desc, log_path in CRON_JOB_INFO:
+        if needle in command:
+            return desc, log_path
+    # Fallback for anything not in the table above: the first path-looking
+    # token's filename, minus extension, so a new cron job at least shows
+    # something better than the full command line. Skip interpreter
+    # executables (python, python3, bash, sh, ...) -- a venv path like
+    # ".../venv/bin/python3 /path/to/real_script.py" would otherwise match
+    # on "python3" itself and show that instead of the actual script.
+    INTERPRETERS = {'python', 'python3', 'python2', 'bash', 'sh', 'node', 'perl', 'ruby'}
+    for token in command.split():
+        if '/' in token and os.path.splitext(os.path.basename(token))[0] not in INTERPRETERS:
+            return os.path.splitext(os.path.basename(token))[0], None
+    return command, None
+
+
+def get_cron_jobs():
+    """Full live listing of dave's own crontab (`crontab -l`) -- i.e. all
+    non-system cron jobs, as opposed to root's /etc/crontab / /etc/cron.d
+    entries. Commented-out '# DISABLED ...' lines are skipped since they
+    aren't actually scheduled."""
+    try:
+        out = subprocess.run(['crontab', '-l'], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
     jobs = []
-    for name, schedule, log_path in [
-        ('Bowsy latest-post fetch',    'hourly',      BOWSY_FEED_LOG),
-    ]:
-        status = _last_job_status(log_path) or {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
-        jobs.append({'name': name, 'schedule': schedule, **status})
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split(None, 5)
+        if len(parts) < 6:
+            continue
+        schedule, command = ' '.join(parts[:5]), parts[5]
+        description, log_path = _cron_job_info(command)
+        status = (log_path and _last_job_status(log_path)) or \
+            {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
+        jobs.append({
+            'schedule': schedule,
+            'schedule_human': _cron_schedule_human(schedule),
+            'command': command,
+            'description': description,
+            **status,
+        })
     return jobs
 
 
@@ -807,7 +887,7 @@ def build_dashboard():
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
-        'other_jobs': get_other_jobs(),
+        'cron_jobs': get_cron_jobs(),
     }
 
 
