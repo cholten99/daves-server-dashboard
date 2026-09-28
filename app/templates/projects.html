@@ -162,7 +162,10 @@
   const board = JSON.parse(document.getElementById('board-data').textContent);
   const cardsById = {};
   for (const list of Object.keys(board)) {
-    for (const card of board[list]) cardsById[card.id] = { ...card, list_name: list };
+    for (const card of board[list]) {
+      card.list_name = list;
+      cardsById[card.id] = card;
+    }
   }
   let selectedId = null;
 
