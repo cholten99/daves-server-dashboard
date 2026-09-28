@@ -231,6 +231,7 @@
             {% if c.status == 'ok' %}<span class="badge badge-ok" title="{{ c.message }}">OK</span>
             {% elif c.status == 'warning' %}<span class="badge badge-warning" title="{{ c.message }}">{{ c.message }}</span>
             {% elif c.status == 'fail' %}<span class="badge fail" title="{{ c.message }}">Failed</span>
+            {% elif c.status == 'see_above' %}<span class="badge badge-off" title="{{ c.message }}">See above</span>
             {% else %}<span class="badge badge-off" title="{{ c.message }}">Unknown</span>{% endif %}
           </td>
         </tr>
@@ -327,6 +328,7 @@ function updateJobs(jobs) {
     const status = c.status === 'ok' ? `<span class="badge badge-ok" title="${c.message}">OK</span>`
       : c.status === 'warning' ? `<span class="badge badge-warning" title="${c.message}">${c.message}</span>`
       : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
+      : c.status === 'see_above' ? `<span class="badge badge-off" title="${c.message}">See above</span>`
       : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
     return `<td class="file" title="${c.command}">${c.description}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;
   });

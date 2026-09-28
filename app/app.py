@@ -793,14 +793,17 @@ def _cron_schedule_human(schedule):
 # handles several line formats (bracketed or bare timestamps, with or
 # without a 'LEVEL:'/'LEVEL extra:' prefix, ISO-8601 'T' separators) and
 # falls back to the log file's own mtime if no line has a parseable
-# timestamp at all -- so status only stays unknown for security-audit.sh and
-# backup.py (log_path None), where another dashboard section (Security
-# audit, Backups) already covers status in more detail than a one-line
-# badge could.
+# timestamp at all -- so the only two log_path values that don't resolve to
+# a real ok/fail are security-audit.sh and backup.py, which use the
+# SEE_ABOVE sentinel instead of None: another dashboard section (Security
+# audit, Backups) already covers their status in more detail than a one-line
+# badge could, so get_cron_jobs() reports them as 'see_above' rather than
+# 'unknown' -- unknown is reserved for a job that's genuinely unaccounted for.
+SEE_ABOVE = 'SEE_ABOVE'
 CRON_JOB_INFO = [
     # needle,                       description,                                                     log path
-    ('security-audit.sh',          'Security audit scan',                                            None),
-    ('backup.py',                  'Server backup run',                                               None),
+    ('security-audit.sh',          'Security audit scan',                                            SEE_ABOVE),
+    ('backup.py',                  'Server backup run',                                               SEE_ABOVE),
     ('fetch-latest-post.py',       'Fetch latest Bowsy blog post',                                    BOWSY_FEED_LOG),
     ('site-traffic/pull_daily.py', 'Pull site traffic stats (Search Console + Cloudflare)',           '/var/www/site-traffic/logs/pull.log'),
     ('unofficial-andy/main.py',    "Cross-post TikTok/Instagram to Bluesky ('Unofficial Andy')",      '/home/dave/projects/unofficial-andy/logs/cron.log'),
@@ -850,8 +853,11 @@ def get_cron_jobs():
             continue
         schedule, command = ' '.join(parts[:5]), parts[5]
         description, log_path = _cron_job_info(command)
-        status = (log_path and _last_job_status(log_path)) or \
-            {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
+        if log_path == SEE_ABOVE:
+            status = {'last_run': None, 'status': 'see_above', 'message': 'Covered above (Security audit / Backups)'}
+        else:
+            status = (log_path and _last_job_status(log_path)) or \
+                {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
         jobs.append({
             'schedule': schedule,
             'schedule_human': _cron_schedule_human(schedule),
