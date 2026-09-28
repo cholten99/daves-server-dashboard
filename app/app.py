@@ -584,10 +584,18 @@ def get_media_resize_status():
     return result
 
 
-JOB_LOG_LINE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? (\w+)(?: [^\s:]+)?: (.*)$')
+JOB_LOG_LINE_RE = re.compile(r'^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\]?(?:\s+(\w+)(?: [^\s:]+)?:)?\s*(.*)$')
 
 
 def _last_job_status(log_path):
+    # log_path may contain a glob (e.g. update_rebuild_docs.py writes a fresh
+    # timestamped file per run, not one fixed path) -- resolve to the most
+    # recently modified match first.
+    if '*' in log_path:
+        matches = glob.glob(log_path)
+        if not matches:
+            return None
+        log_path = max(matches, key=os.path.getmtime)
     if not os.path.isfile(log_path):
         return None
     try:
@@ -596,13 +604,35 @@ def _last_job_status(log_path):
     except OSError:
         return None
     for line in reversed(lines):
-        m = JOB_LOG_LINE_RE.match(line.strip())
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = JOB_LOG_LINE_RE.match(stripped)
         if not m:
             continue
         ts, level, msg = m.groups()
-        if level.upper() == 'ERROR':
+        ts = ts.replace('T', ' ')
+        # Only a genuine 'LEVEL: message' line (fetch-latest-post.py etc) can
+        # report fail -- logs that just prefix a bare timestamp (selfheal.py's
+        # "[ts] clean run", the watchdog's "ts run start") have no level
+        # concept, so those always read as ok; the raw text is still shown as
+        # the message so anything worth noticing (e.g. the watchdog's "SSH ...
+        # failed" lines) is visible even though it isn't flagged red here.
+        if level and level.upper() == 'ERROR':
             return {'last_run': ts, 'status': 'fail', 'message': msg}
-        return {'last_run': ts, 'status': 'ok', 'message': msg}
+        return {'last_run': ts, 'status': 'ok', 'message': msg or (level or '')}
+    # No line matched any timestamp pattern at all (count_listens.py,
+    # sync_podcast_host.py -- neither prefixes its own output) -- fall back to
+    # the log file's own mtime plus its last non-empty line, rather than
+    # reporting unknown just because the script doesn't timestamp its lines.
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped:
+            return {
+                'last_run': datetime.fromtimestamp(os.path.getmtime(log_path)).strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'ok',
+                'message': stripped,
+            }
     return None
 
 
@@ -759,11 +789,14 @@ def _cron_schedule_human(schedule):
 # Human descriptions for known cron commands, matched by substring against
 # the full command line -- keyed on a stable bit of the path/script name so
 # unrelated flags/redirects in the crontab entry don't break the match. Log
-# path is used to show a real Last run/Status (via _last_job_status), where
-# the script actually writes timestamped 'LEVEL: message' lines; None where
-# it doesn't (or where another dashboard section -- Security audit, Backups
-# -- already covers that job's status in more detail than a one-line badge
-# could).
+# path is used to show a real Last run/Status via _last_job_status(), which
+# handles several line formats (bracketed or bare timestamps, with or
+# without a 'LEVEL:'/'LEVEL extra:' prefix, ISO-8601 'T' separators) and
+# falls back to the log file's own mtime if no line has a parseable
+# timestamp at all -- so status only stays unknown for security-audit.sh and
+# backup.py (log_path None), where another dashboard section (Security
+# audit, Backups) already covers status in more detail than a one-line
+# badge could.
 CRON_JOB_INFO = [
     # needle,                       description,                                                     log path
     ('security-audit.sh',          'Security audit scan',                                            None),
@@ -771,10 +804,13 @@ CRON_JOB_INFO = [
     ('fetch-latest-post.py',       'Fetch latest Bowsy blog post',                                    BOWSY_FEED_LOG),
     ('site-traffic/pull_daily.py', 'Pull site traffic stats (Search Console + Cloudflare)',           '/var/www/site-traffic/logs/pull.log'),
     ('unofficial-andy/main.py',    "Cross-post TikTok/Instagram to Bluesky ('Unofficial Andy')",      '/home/dave/projects/unofficial-andy/logs/cron.log'),
-    ('count_listens.py',           'Count podcast listens (all shows)',                               None),
-    ('sync_podcast_host.py',       'Sync TransformGov Talks podcast stats',                            None),
+    ('count_listens.py',           'Count podcast listens (all shows)',                               '/home/dave/logs/podcast-listens.log'),
+    ('sync_podcast_host.py',       'Sync TransformGov Talks podcast stats',                            '/home/dave/logs/tgt-podcast-sync.log'),
     ('selfheal.py',                'Media-resize self-heal (auto-fix stuck jobs)',                     '/var/www/media-resize/logs/selfheal-cron.log'),
-    ('update_rebuild_docs.py',     'Rebuild-docs drift check (SERVER-BACKUP.md / home-pc-backup.md)',  None),
+    ('media-resize-remote-watchdog.sh', 'Media-resize remote worker watchdog',                         '/home/dave/projects/server-scripts/media-resize-remote-watchdog.log'),
+    # Writes a fresh timestamped file per run rather than one fixed path --
+    # _last_job_status() resolves the glob to the most recently modified match.
+    ('update_rebuild_docs.py',     'Rebuild-docs drift check (SERVER-BACKUP.md / home-pc-backup.md)',  os.path.join(BACKUP_LOGS_DIR, '*-rebuild-docs.log')),
 ]
 
 
