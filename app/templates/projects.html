@@ -99,7 +99,9 @@
       color: #ccc;
     }
     .rt-editor:focus { outline: none; border-color: #69c; }
-    .rt-editor a { color: #9cf; }
+    /* Inside contenteditable, the browser forces a text-caret cursor everywhere,
+       including over links -- override it so links look and feel clickable. */
+    .rt-editor a { color: #9cf; cursor: pointer; }
     .rt-editor ul, .rt-editor ol { padding-left: 1.3rem; }
     .rt-editor:empty::before { content: 'Click to add a description…'; color: #666; }
 
@@ -110,7 +112,8 @@
     .todo-list { list-style: none; display: flex; flex-direction: column; gap: .3rem; margin-bottom: .5rem; }
     .todo-item { display: flex; align-items: center; gap: .5rem; font-size: .88rem; cursor: grab; }
     .todo-item input[type=checkbox] { accent-color: #6d6; width: 1rem; height: 1rem; flex-shrink: 0; }
-    .todo-item .todo-text { flex: 1; word-break: break-word; }
+    .todo-item .todo-text { flex: 1; word-break: break-word; cursor: text; border-radius: 3px; padding: .1rem .3rem; margin: -.1rem -.3rem; }
+    .todo-item .todo-text:focus { outline: none; background: #1e1e1e; box-shadow: 0 0 0 1px #69c; }
     .todo-item.checked .todo-text { color: #777; text-decoration: line-through; }
     .todo-item .icon-btn { padding: .15rem .5rem; font-size: .75rem; }
     .todo-add-form { display: flex; gap: .4rem; }
@@ -268,12 +271,6 @@
     }
   }
 
-  function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
   function renderDetail(cardId) {
     const card = cardsById[cardId];
     if (!card) {
@@ -283,7 +280,7 @@
 
     detailPane.innerHTML = `
       <div class="detail-header">
-        <input type="text" class="detail-title" id="detail-title" value="${escapeHtml(card.title)}">
+        <input type="text" class="detail-title" id="detail-title">
         <button class="icon-btn delete-card-btn" id="delete-card-btn" title="Delete card">Delete</button>
       </div>
       <div class="tag-picker" id="tag-picker">
@@ -311,12 +308,22 @@
       </div>
     `;
 
+    document.getElementById('detail-title').value = card.title;
     document.getElementById('detail-title').addEventListener('blur', onTitleBlur);
     document.getElementById('delete-card-btn').addEventListener('click', onDeleteCard);
     detailPane.querySelectorAll('.tag-btn').forEach(btn => {
       btn.addEventListener('click', () => onTagClick(btn.dataset.tag));
     });
     document.getElementById('rt-editor').addEventListener('blur', onDescriptionBlur);
+    // Links inside a contenteditable region don't navigate on click by default
+    // (the browser places the text cursor instead) -- open them explicitly.
+    document.getElementById('rt-editor').addEventListener('click', (e) => {
+      const a = e.target.closest('a');
+      if (a && a.href) {
+        e.preventDefault();
+        window.open(a.href, '_blank', 'noopener,noreferrer');
+      }
+    });
     detailPane.querySelectorAll('.rt-toolbar button').forEach(btn => {
       btn.addEventListener('click', () => runRichTextCmd(btn.dataset.cmd));
     });
@@ -345,6 +352,11 @@
       const span = document.createElement('span');
       span.className = 'todo-text';
       span.textContent = item.text;
+      span.contentEditable = 'true';
+      span.addEventListener('blur', () => onTodoTextBlur(card.id, item.id, span));
+      span.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); span.blur(); }
+      });
 
       const del = document.createElement('button');
       del.type = 'button';
@@ -488,6 +500,17 @@
         renderTodoList(card);
         updateCardBadge(card.id);
       })
+      .catch(console.error);
+  }
+
+  function onTodoTextBlur(cardId, todoId, span) {
+    const card = cardsById[cardId];
+    const item = card.todo_items.find(i => i.id === todoId);
+    const newText = span.textContent.trim();
+    if (!newText) { span.textContent = item.text; return; }
+    if (newText === item.text) return;
+    item.text = newText;
+    api(`/api/projects/todos/${todoId}`, { method: 'PATCH', body: JSON.stringify({ text: newText }) })
       .catch(console.error);
   }
 
