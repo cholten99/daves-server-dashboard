@@ -318,6 +318,7 @@
       btn.addEventListener('click', () => onTagClick(btn.dataset.tag));
     });
     document.getElementById('rt-editor').addEventListener('blur', onDescriptionBlur);
+    document.getElementById('rt-editor').addEventListener('keydown', onEditorKeydown);
     // Links inside a contenteditable region don't navigate on click by default
     // (the browser places the text cursor instead) -- open them explicitly.
     document.getElementById('rt-editor').addEventListener('click', (e) => {
@@ -421,6 +422,39 @@
     } else {
       document.execCommand(cmd, false, null);
     }
+  }
+
+  // Finds the direct child of `editor` that contains `node` -- i.e. the
+  // block-level line the caret is in (Chrome wraps each new line in its own
+  // <div> inside a contenteditable, except the first line before any Enter).
+  function getBlockAncestor(node, editor) {
+    let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    while (el && el !== editor && el.parentElement !== editor) {
+      el = el.parentElement;
+    }
+    return el || editor;
+  }
+
+  function onEditorKeydown(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      runRichTextCmd('link');
+      return;
+    }
+    if (e.key !== ' ') return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return;
+    const editor = e.currentTarget;
+    const blockEl = getBlockAncestor(range.startContainer, editor);
+    const preRange = document.createRange();
+    preRange.selectNodeContents(blockEl);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    if (preRange.toString() !== '*') return;
+    e.preventDefault();
+    preRange.deleteContents();
+    document.execCommand('insertUnorderedList', false, null);
   }
 
   function onTitleBlur(e) {
