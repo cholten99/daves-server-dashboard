@@ -240,6 +240,25 @@
     </div>
   </section>
 
+  <section>
+    <h2 class="collapsible">Always-on Processes<span class="chevron">▾</span></h2>
+    <div id="processes-content">
+      <table>
+        <tr><th>Process</th><th>Status</th><th>Running since</th></tr>
+        {% for p in processes %}
+        <tr>
+          <td class="file">{% if p.link %}<a href="{{ p.link }}" target="_blank" style="color:#9cf;text-decoration:none">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</td>
+          <td>
+            {% if p.running %}<span class="badge badge-ok">Running</span>
+            {% else %}<span class="badge fail">Stopped</span>{% endif %}
+          </td>
+          <td class="dim">{{ timeago(p.since) if p.since else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
 <script>
 function tableHtml(headers, rows) {
   const head = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
@@ -334,6 +353,17 @@ function updateJobs(jobs) {
   });
   el.innerHTML = tableHtml(['Job', 'Schedule', 'Last run', 'Status'], rows);
 }
+function updateProcesses(processes) {
+  const el = document.getElementById('processes-content');
+  if (!processes.length) { el.innerHTML = '<p class="empty">No processes configured.</p>'; return; }
+  const rows = processes.map(p => {
+    const name = p.link ? `<a href="${p.link}" target="_blank" style="color:#9cf;text-decoration:none">${p.name}</a>` : p.name;
+    const status = p.running ? '<span class="badge badge-ok">Running</span>' : '<span class="badge fail">Stopped</span>';
+    const since = p.since ? timeAgo(p.since) : '—';
+    return `<td class="file">${name}</td><td>${status}</td><td class="dim">${since}</td>`;
+  });
+  el.innerHTML = tableHtml(['Process', 'Status', 'Running since'], rows);
+}
 function poll() {
   fetch('/api/data')
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
@@ -343,6 +373,7 @@ function poll() {
       updateBackups(data.backups);
       updateMediaResize(data.media_resize);
       updateJobs(data.cron_jobs);
+      updateProcesses(data.processes);
       document.getElementById('pulse').classList.add('live');
     })
     .catch(() => {

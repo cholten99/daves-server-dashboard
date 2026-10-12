@@ -868,6 +868,71 @@ def get_cron_jobs():
     return jobs
 
 
+# ── Always-on processes ──────────────────────────────────────────────────────────
+# Dave's own long-running services, as opposed to base-OS daemons (ssh, cron,
+# NetworkManager, dbus, ...) that systemd also reports as running. This is a
+# whitelist rather than a filter over the full unit list on purpose -- the
+# base-OS set changes with every Ubuntu/snap update, but this list only
+# changes when Dave actually adds or removes one of his own services.
+PROCESS_INFO = [
+    # systemd unit,                       human name,                      link (live URL) or None
+    ('apache2.service',                   'Apache (web server)',           None),
+    ('mysql.service',                     'MySQL (database)',              None),
+    ('cloudflared.service',               'Cloudflare Tunnel',             None),
+    ('jellyfin.service',                  'Jellyfin Media Server',         'https://jellyfin.bowsy.co.uk'),
+    ('media-resize.service',              'Media Resize',                  'https://media-resize.bowsy.co.uk'),
+    ('notify-printer-viewer.service',     'Notify Printer (viewer)',       'https://notify-printer-viewer.bowsy.co.uk'),
+    ('notify-printer-pappl.service',      'Notify Printer (IPP server)',   'https://notify-printer.bowsy.co.uk'),
+    ('notify-printer-internal.service',   'Notify Printer (internal API)', None),
+    ('daves-apps.service',                "Dave's Apps",                   'https://daves-apps.bowsy.co.uk'),
+    ('daves-apps-staging.service',        "Dave's Apps (staging)",         'https://staging.daves-apps.bowsy.co.uk'),
+    ('daves-server-dashboard.service',    'Server Dashboard (this app)',   'https://daves-server-dashboard.bowsy.co.uk'),
+    ('nordvpnd.service',                  'NordVPN client',                None),
+]
+
+
+def _systemd_active_since(unit):
+    """ISO timestamp of when this unit entered its current active state, or
+    None if it isn't running / systemctl can't be read. Goes via `date -d`
+    because ActiveEnterTimestamp's rendered form (e.g. 'Tue 2026-10-13
+    00:49:37 BST') isn't reliably parseable by strptime's %Z across
+    timezones, but `date` already understands systemd's own format."""
+    try:
+        raw = subprocess.run(
+            ['systemctl', 'show', '-p', 'ActiveEnterTimestamp', '--value', unit],
+            capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+        if not raw:
+            return None
+        epoch = subprocess.run(
+            ['date', '-d', raw, '+%s'], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+        return datetime.fromtimestamp(int(epoch)).isoformat()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def get_running_processes():
+    """Live status of Dave's own always-on services -- see PROCESS_INFO."""
+    processes = []
+    for unit, name, link in PROCESS_INFO:
+        try:
+            state = subprocess.run(
+                ['systemctl', 'is-active', unit],
+                capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            state = 'unknown'
+        running = state == 'active'
+        processes.append({
+            'name': name,
+            'link': link,
+            'running': running,
+            'since': _systemd_active_since(unit) if running else None,
+        })
+    return processes
+
+
 # ── Projects board ──────────────────────────────────────────────────────────────
 
 PROJECTS_ALLOWED_TAGS = {
@@ -1150,6 +1215,7 @@ def build_dashboard():
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
         'cron_jobs': get_cron_jobs(),
+        'processes': get_running_processes(),
     }
 
 
