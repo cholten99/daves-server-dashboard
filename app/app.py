@@ -884,8 +884,6 @@ PROCESS_INFO = [
     ('notify-printer-viewer.service',     'Notify Printer (viewer)',       'https://notify-printer-viewer.bowsy.co.uk'),
     ('notify-printer-pappl.service',      'Notify Printer (IPP server)',   'https://notify-printer.bowsy.co.uk'),
     ('notify-printer-internal.service',   'Notify Printer (internal API)', None),
-    ('daves-apps.service',                "Dave's Apps",                   'https://daves-apps.bowsy.co.uk'),
-    ('daves-apps-staging.service',        "Dave's Apps (staging)",         'https://staging.daves-apps.bowsy.co.uk'),
     ('daves-server-dashboard.service',    'Server Dashboard (this app)',   'https://daves-server-dashboard.bowsy.co.uk'),
     ('nordvpnd.service',                  'NordVPN client',                None),
 ]
