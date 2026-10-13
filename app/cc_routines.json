@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Weekly dead-code audit (whole files + intra-file)",
+    "description": "Dead-code audit (orphaned files + unused code in live files)",
+    "cron_expression": "0 2 * * 0",
+    "schedule_human": "Weekly, Sundays 02:00 UTC",
+    "enabled": true,
+    "next_run_at": "2026-10-18T02:06:38Z",
+    "last_run_at": null,
+    "last_run_status": null,
+    "routine_url": "https://claude.ai/code/routines/trig_015dTgMtw6qTP7Rqd7mBtoqE",
+    "snapshot_at": "2026-10-13T00:40:07Z"
+  }
+]

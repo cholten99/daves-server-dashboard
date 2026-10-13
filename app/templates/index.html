@@ -221,10 +221,11 @@
     <h2 class="collapsible">Cron Jobs<span class="chevron">▾</span></h2>
     <div id="jobs-content">
       <table>
-        <tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
+        <tr><th>Job</th><th>Type</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
         {% for c in cron_jobs %}
         <tr>
-          <td class="file" title="{{ c.command }}">{{ c.description }}</td>
+          <td class="file" title="{{ c.command }}">{% if c.link %}<a href="{{ c.link }}" target="_blank" style="color:#9cf;text-decoration:none">{{ c.description }}</a>{% else %}{{ c.description }}{% endif %}</td>
+          <td class="dim">{{ c.type }}</td>
           <td class="dim" title="{{ c.schedule }}">{{ c.schedule_human }}</td>
           <td class="dim">{{ timeago(c.last_run) if c.last_run else '—' }}</td>
           <td>
@@ -349,9 +350,10 @@ function updateJobs(jobs) {
       : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
       : c.status === 'see_above' ? `<span class="badge badge-off" title="${c.message}">See above</span>`
       : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
-    return `<td class="file" title="${c.command}">${c.description}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;
+    const name = c.link ? `<a href="${c.link}" target="_blank" style="color:#9cf;text-decoration:none">${c.description}</a>` : c.description;
+    return `<td class="file" title="${c.command}">${name}</td><td class="dim">${c.type}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;
   });
-  el.innerHTML = tableHtml(['Job', 'Schedule', 'Last run', 'Status'], rows);
+  el.innerHTML = tableHtml(['Job', 'Type', 'Schedule', 'Last run', 'Status'], rows);
 }
 function updateProcesses(processes) {
   const el = document.getElementById('processes-content');

@@ -859,11 +859,54 @@ def get_cron_jobs():
             status = (log_path and _last_job_status(log_path)) or \
                 {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
         jobs.append({
+            'type': 'Local',
+            'link': None,
             'schedule': schedule,
             'schedule_human': _cron_schedule_human(schedule),
             'command': command,
             'description': description,
             **status,
+        })
+    return jobs
+
+
+CC_ROUTINES_PATH = os.path.join(os.path.dirname(__file__), 'cc_routines.json')
+
+
+def get_cc_routines():
+    """Scheduled cloud agent routines (claude.ai/code/routines) -- these run
+    on Anthropic's infrastructure, not as entries in this server's crontab,
+    so they can't be discovered live the way get_cron_jobs() discovers local
+    ones. Instead this reads a snapshot file that gets refreshed by hand
+    (via a Claude Code session with routines access) whenever a routine is
+    added, changed, or run -- deliberately not a live API call from here,
+    since that would mean putting a claude.ai auth credential in this
+    always-on, internet-facing app."""
+    try:
+        with open(CC_ROUTINES_PATH) as f:
+            routines = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    jobs = []
+    for r in routines:
+        if not r.get('enabled', True):
+            continue
+        if r.get('last_run_status') == 'ROUTINE_RUN_STATUS_SUCCEEDED':
+            status, message = 'ok', 'Succeeded'
+        elif r.get('last_run_status') and 'FAIL' in r['last_run_status']:
+            status, message = 'fail', 'Failed'
+        else:
+            status, message = 'unknown', 'Not yet run'
+        jobs.append({
+            'type': 'Cloud',
+            'link': r.get('routine_url'),
+            'schedule': r.get('cron_expression', ''),
+            'schedule_human': r.get('schedule_human', ''),
+            'command': r.get('routine_url', ''),
+            'description': r.get('description', r.get('name', '')),
+            'last_run': r.get('last_run_at'),
+            'status': status,
+            'message': message,
         })
     return jobs
 
@@ -1212,7 +1255,7 @@ def build_dashboard():
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
-        'cron_jobs': get_cron_jobs(),
+        'cron_jobs': get_cron_jobs() + get_cc_routines(),
         'processes': get_running_processes(),
     }
 
