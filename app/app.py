@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 from guessit import guessit as _guessit
@@ -515,6 +515,21 @@ def get_backup_run_detail(run_id):
     }
 
 
+def _mr_utc_to_local(ts):
+    """media-resize's state.db stores started_at via sqlite's datetime('now'), which
+    is UTC -- timeago() (below) assumes a naive *local* timestamp, matching every
+    other source it's fed (mtime-based last_run, _systemd_active_since, etc. are
+    all already local). Converting here, at the one mismatched source, keeps
+    timeago() itself correct for everything else instead of special-casing it."""
+    try:
+        return (datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                .replace(tzinfo=timezone.utc)
+                .astimezone()
+                .strftime('%Y-%m-%d %H:%M:%S'))
+    except (ValueError, TypeError):
+        return ts
+
+
 def get_media_resize_status():
     result = {
         'reachable': False,
@@ -556,7 +571,7 @@ def get_media_resize_status():
         r['worker']: {
             'filename':   display_name(os.path.basename(r['path'])),
             'status':     r['status'],
-            'started_at': r['started_at'] or '',
+            'started_at': _mr_utc_to_local(r['started_at']) if r['started_at'] else '',
         } for r in active_rows if r['worker']
     }
 
