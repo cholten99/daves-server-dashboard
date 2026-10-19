@@ -37,6 +37,21 @@
     .nav { float: right; font-size: .85rem; display: flex; align-items: center; gap: 1rem; }
     .nav a { color: #ddd; text-decoration: none; }
     .nav a:hover { color: #fff; }
+    .nav-dropdown { position: relative; }
+    .nav-dropdown-toggle {
+      background: #2e2e2e; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      cursor: pointer; font-size: .85rem; padding: .3rem .7rem; font-family: inherit;
+    }
+    .nav-dropdown-toggle:hover { background: #363636; border-color: #555; }
+    .nav-dropdown-menu {
+      display: none; flex-direction: column; gap: .1rem;
+      position: absolute; top: 100%; right: 0; margin-top: .3rem;
+      background: #272727; border: 1px solid #3a3a3a; border-radius: 6px;
+      min-width: 170px; padding: .3rem; z-index: 10;
+    }
+    .nav-dropdown-menu.open { display: flex; }
+    .nav-dropdown-menu a { padding: .4rem .6rem; border-radius: 4px; white-space: nowrap; }
+    .nav-dropdown-menu a:hover { background: #333; color: #fff; }
     .pulse { width: 7px; height: 7px; border-radius: 50%; background: #555; display: inline-block; }
     .pulse.live { background: #6d6; animation: blink 2s infinite; }
     @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.3 } }
@@ -61,13 +76,19 @@
   <h1>Dave's Server
     <span class="nav">
       <span class="pulse" id="pulse" title="Live updates"></span>
-      <a href="/projects">Projects board</a>
-      <a href="https://media-resize.bowsy.co.uk" target="_blank">Media Resize board</a>
-      <a href="https://jellyfin.bowsy.co.uk" target="_blank">Jellyfin</a>
-      <a href="https://sonarr.bowsy.co.uk" target="_blank">Sonarr</a>
-      <a href="https://radarr.bowsy.co.uk" target="_blank">Radarr</a>
-      <a href="https://prowlarr.bowsy.co.uk" target="_blank">Prowlarr</a>
-      <a href="https://qbittorrent.bowsy.co.uk" target="_blank">qBittorrent</a>
+      <div class="nav-dropdown">
+        <button class="nav-dropdown-toggle" type="button">Links &#9662;</button>
+        <div class="nav-dropdown-menu">
+          <a href="/">Dashboard</a>
+          <a href="/projects">Projects board</a>
+          <a href="https://media-resize.bowsy.co.uk" target="_blank">Media Resize board</a>
+          <a href="https://jellyfin.bowsy.co.uk" target="_blank">Jellyfin</a>
+          <a href="https://sonarr.bowsy.co.uk" target="_blank">Sonarr</a>
+          <a href="https://radarr.bowsy.co.uk" target="_blank">Radarr</a>
+          <a href="https://prowlarr.bowsy.co.uk" target="_blank">Prowlarr</a>
+          <a href="https://qbittorrent.bowsy.co.uk" target="_blank">qBittorrent</a>
+        </div>
+      </div>
       <a href="/logout">Log out</a>
     </span>
   </h1>
@@ -395,6 +416,16 @@ document.querySelectorAll('h2.collapsible').forEach(h2 => {
     if (e.target.closest('a')) return; // let Site Traffic / Media Resize links navigate, don't also toggle
     h2.closest('section').classList.toggle('collapsed');
   });
+});
+
+document.querySelectorAll('.nav-dropdown-toggle').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    btn.nextElementSibling.classList.toggle('open');
+  });
+});
+document.addEventListener('click', () => {
+  document.querySelectorAll('.nav-dropdown-menu.open').forEach(m => m.classList.remove('open'));
 });
 </script>
 </body>
