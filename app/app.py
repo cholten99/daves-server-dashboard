@@ -783,11 +783,22 @@ def get_site_traffic_detail():
     return sites
 
 
+# cron's single-token schedule shortcuts (crontab(5)), e.g. the @reboot entry
+# that restarts Claude Code Remote Control after the box comes back up.
+CRON_SHORTCUTS = {
+    '@reboot': 'At boot',
+    '@hourly': 'Hourly', '@daily': 'Daily', '@midnight': 'Daily',
+    '@weekly': 'Weekly', '@monthly': 'Monthly', '@yearly': 'Yearly', '@annually': 'Yearly',
+}
+
+
 def _cron_schedule_human(schedule):
     """Best-effort plain-English rendering of a 5-field cron schedule. Falls
     back to the raw cron expression for anything more exotic than a fixed
     daily/hourly time or a '*/N' step, which covers every job in dave's
     crontab as of writing."""
+    if schedule.startswith('@'):
+        return CRON_SHORTCUTS.get(schedule, schedule)
     minute, hour, dom, month, dow = schedule.split()
     if dom == '*' and month == '*' and dow == '*':
         if minute == '*' and hour == '*':
@@ -826,6 +837,7 @@ CRON_JOB_INFO = [
     ('sync_podcast_host.py',       'Sync TransformGov Talks podcast stats',                            '/home/dave/logs/tgt-podcast-sync.log'),
     ('selfheal.py',                'Media-resize self-heal (auto-fix stuck jobs)',                     '/var/www/media-resize/logs/selfheal-cron.log'),
     ('media-resize-remote-watchdog.sh', 'Media-resize remote worker watchdog',                         '/home/dave/projects/server-scripts/media-resize-remote-watchdog.log'),
+    ('remote-control/new-instance.sh', 'Start a Claude Code Remote Control instance after reboot',     '/home/dave/logs/claude-remote-control/reboot-start.log'),
     # Writes a fresh timestamped file per run rather than one fixed path --
     # _last_job_status() resolves the glob to the most recently modified match.
     ('update_rebuild_docs.py',     'Rebuild-docs drift check (SERVER-BACKUP.md / home-pc-backup.md)',  os.path.join(BACKUP_LOGS_DIR, '*-rebuild-docs.log')),
@@ -863,10 +875,16 @@ def get_cron_jobs():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-        parts = line.split(None, 5)
-        if len(parts) < 6:
-            continue
-        schedule, command = ' '.join(parts[:5]), parts[5]
+        if line.startswith('@'):
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                continue
+            schedule, command = parts
+        else:
+            parts = line.split(None, 5)
+            if len(parts) < 6:
+                continue
+            schedule, command = ' '.join(parts[:5]), parts[5]
         description, log_path = _cron_job_info(command)
         if log_path == SEE_ABOVE:
             status = {'last_run': None, 'status': 'see_above', 'message': 'Covered above (Security audit / Backups)'}
