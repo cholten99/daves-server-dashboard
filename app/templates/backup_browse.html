@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ item_name or 'Backups' }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.25rem; }
+    a { color: #69c; text-decoration: none; }
+    a:hover { color: #9cf; }
+    a.back { font-size: .85rem; display: inline-block; margin-bottom: 1rem; }
+    .crumbs { font-size: .9rem; margin-bottom: .9rem; word-break: break-all; }
+    .crumbs span.sep { color: #666; margin: 0 .3rem; }
+    form.search { display: flex; gap: .5rem; margin-bottom: 1rem; max-width: 32rem; }
+    form.search input {
+      flex: 1; background: #272727; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      font: inherit; font-size: .9rem; padding: .4rem .6rem;
+    }
+    form.search button {
+      background: #2e2e2e; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      font: inherit; font-size: .85rem; padding: .4rem .9rem; cursor: pointer;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; background: #272727; border-radius: 6px; overflow: hidden; }
+    th { text-align: left; color: #ddd; font-weight: 500; padding: .5rem .75rem; border-bottom: 1px solid #333; background: #242424; }
+    td { padding: .45rem .75rem; border-bottom: 1px solid #2e2e2e; word-break: break-all; }
+    tr:last-child td { border-bottom: none; }
+    td.size { text-align: right; white-space: nowrap; color: #999; width: 7rem; word-break: normal; }
+    .folder::before { content: "📁 "; }
+    .empty { color: #999; font-size: .9rem; padding: .5rem 0; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/backups">&larr; Backups</a>
+  {% if not_found %}
+  <h1>Not found</h1>
+  <p class="sub">That item, night or folder isn't in the kept backups. Nights older than 7 days are deleted, and the earliest nights only go back to when backup history was switched on.</p>
+  {% else %}
+  <h1>{{ item_name }}</h1>
+  <p class="sub">As of: {{ night_label }}</p>
+
+  {% set base = '/backups/browse/' ~ slug ~ '/' ~ night ~ '/' %}
+  {% set filebase = '/backups/file/' ~ slug ~ '/' ~ night ~ '/' %}
+  <div class="crumbs">
+    <a href="{{ base }}">(top)</a>
+    {% for c in crumbs %}<span class="sep">/</span><a href="{{ base }}{{ crumbs[:loop.index] | join('/') | urlencode }}/">{{ c }}</a>{% endfor %}
+  </div>
+
+  <form class="search" method="get" action="{{ base }}">
+    <input name="q" value="{{ query }}" placeholder="Search file names in this backup">
+    <button type="submit">Search</button>
+  </form>
+
+  {% if query %}
+    {% if hits %}
+    <table>
+      <tr><th>File</th><th class="size">Size</th></tr>
+      {% for path, size in hits %}
+      <tr><td><a href="{{ filebase }}{{ path | urlencode }}">{{ path }}</a></td><td class="size">{{ human_size(size) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% if hits | length >= 500 %}<p class="empty">Showing the first 500 matches — try a longer search.</p>{% endif %}
+    {% else %}
+    <p class="empty">No file names contain "{{ query }}".</p>
+    {% endif %}
+  {% else %}
+    {% if folders or files %}
+    <table>
+      <tr><th>Name</th><th class="size">Size</th></tr>
+      {% set here = (rel ~ '/') if rel else '' %}
+      {% for f in folders %}
+      <tr><td><a class="folder" href="{{ base }}{{ (here ~ f) | urlencode }}/">{{ f }}</a></td><td class="size"></td></tr>
+      {% endfor %}
+      {% for name, size in files %}
+      <tr><td><a href="{{ filebase }}{{ (here ~ name) | urlencode }}">{{ name }}</a></td><td class="size">{{ human_size(size) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">This folder is empty.</p>
+    {% endif %}
+  {% endif %}
+  {% endif %}
+</body>
+</html>

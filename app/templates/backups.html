@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backups</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.3rem; color: #eee; margin-bottom: 1.5rem; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; max-width: 46rem; line-height: 1.5; }
+    .nav { float: right; font-size: .85rem; display: flex; align-items: center; gap: 1rem; }
+    .nav a { color: #ddd; text-decoration: none; }
+    .nav a:hover { color: #fff; }
+    .nav-dropdown { position: relative; }
+    .nav-dropdown-toggle {
+      background: #2e2e2e; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      cursor: pointer; font-size: .85rem; padding: .3rem .7rem; font-family: inherit;
+    }
+    .nav-dropdown-toggle:hover { background: #363636; border-color: #555; }
+    .nav-dropdown-menu {
+      display: none; flex-direction: column; gap: .1rem;
+      position: absolute; top: 100%; right: 0; margin-top: .3rem;
+      background: #272727; border: 1px solid #3a3a3a; border-radius: 6px;
+      min-width: 170px; padding: .3rem; z-index: 10;
+    }
+    .nav-dropdown-menu.open { display: flex; }
+    .nav-dropdown-menu a { padding: .4rem .6rem; border-radius: 4px; white-space: nowrap; }
+    .nav-dropdown-menu a:hover { background: #333; color: #fff; }
+    form.pick {
+      background: #272727; border-radius: 6px; padding: 1.25rem; display: flex; flex-wrap: wrap;
+      gap: 1rem; align-items: flex-end; max-width: 46rem;
+    }
+    label { display: flex; flex-direction: column; gap: .35rem; font-size: .8rem; color: #999; flex: 1 1 14rem; }
+    select, button.go {
+      background: #1e1e1e; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px;
+      font: inherit; font-size: .9rem; padding: .45rem .6rem;
+    }
+    button.go { background: #2a4a6a; border-color: #3a6a9a; cursor: pointer; padding: .45rem 1.2rem; flex: 0 0 auto; }
+    button.go:hover { background: #335a80; }
+  </style>
+</head>
+<body>
+  <h1>Backups
+    <span class="nav">
+      <div class="nav-dropdown">
+        <button class="nav-dropdown-toggle" type="button">Links &#9662;</button>
+        <div class="nav-dropdown-menu">
+          <a href="/">Dashboard</a>
+          <a href="/projects">Projects board</a>
+          <a href="/backups">Backups</a>
+          <a href="https://media-resize.bowsy.co.uk" target="_blank">Media Resize board</a>
+          <a href="https://jellyfin.bowsy.co.uk" target="_blank">Jellyfin</a>
+          <a href="https://sonarr.bowsy.co.uk" target="_blank">Sonarr</a>
+          <a href="https://radarr.bowsy.co.uk" target="_blank">Radarr</a>
+          <a href="https://prowlarr.bowsy.co.uk" target="_blank">Prowlarr</a>
+          <a href="https://qbittorrent.bowsy.co.uk" target="_blank">qBittorrent</a>
+        </div>
+      </div>
+      <a href="/logout">Log out</a>
+    </span>
+  </h1>
+
+  <p class="sub">Browse any backed-up item as it was after one of the last 7 nightly backups, and download files from it. Read-only: nothing here changes a backup. Items holding passwords and keys aren't listed.</p>
+
+  {% if items %}
+  <form class="pick" id="pick">
+    <label>What
+      <select id="item">
+        {% for it in items %}<option value="{{ it.slug }}">{{ it.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>When
+      <select id="night"></select>
+    </label>
+    <button class="go" type="submit">Browse</button>
+  </form>
+  {% else %}
+  <p class="sub">No backup items have history yet.</p>
+  {% endif %}
+
+<script>
+const NIGHTS = {{ items | tojson }}.reduce((m, it) => (m[it.slug] = it.nights, m), {});
+const item = document.getElementById('item'), night = document.getElementById('night');
+function fillNights() {
+  night.innerHTML = '';
+  for (const [value, label] of NIGHTS[item.value] || []) {
+    night.add(new Option(label, value));
+  }
+}
+if (item) {
+  item.addEventListener('change', fillNights);
+  fillNights();
+  document.getElementById('pick').addEventListener('submit', (e) => {
+    e.preventDefault();
+    location.href = `/backups/browse/${encodeURIComponent(item.value)}/${encodeURIComponent(night.value)}/`;
+  });
+}
+document.querySelectorAll('.nav-dropdown-toggle').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    btn.nextElementSibling.classList.toggle('open');
+  });
+});
+document.addEventListener('click', () => {
+  document.querySelectorAll('.nav-dropdown-menu.open').forEach(m => m.classList.remove('open'));
+});
+</script>
+</body>
+</html>

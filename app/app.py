@@ -1,5 +1,6 @@
 import gzip
 import glob
+import hmac
 import html as html_lib
 import http.cookiejar
 import json
@@ -15,14 +16,36 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 from guessit import guessit as _guessit
-from flask import Flask, request, redirect, url_for, render_template, make_response, jsonify
+from flask import (Flask, request, redirect, url_for, render_template, jsonify,
+                   send_file, session)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dsd-static-key-2026')
 
-PASSWORD    = os.environ.get('DASHBOARD_PASSWORD', 'watchingdaves2026')
-COOKIE_NAME = 'dsd_auth'
-COOKIE_VAL  = 'granted'
+# Overridable only so a test instance can run with throwaway values
+SECRETS_DIR = os.environ.get('DSD_SECRETS_DIR', '/home/dave/secrets')
+
+
+def _read_secret(name):
+    with open(os.path.join(SECRETS_DIR, name)) as f:
+        return f.read().strip()
+
+
+# Both used to be hard-coded defaults here, and this repo is public on GitHub,
+# so the password was readable by anyone -- and login was a fixed cookie value
+# (dsd_auth=granted) that anyone could set without the password at all.
+# Found 2026-10-22 when adding the Backups page, which serves backed-up files.
+# Now: the password and session-signing key live only in the secrets store,
+# and login is a signed Flask session that can't be forged without the key.
+app.secret_key = _read_secret('dashboard_secret_key')
+PASSWORD = _read_secret('dashboard_password')
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    # Only ever served over HTTPS (Cloudflare tunnel); DSD_INSECURE_COOKIES=1
+    # is for testing on 127.0.0.1 without it.
+    SESSION_COOKIE_SECURE=os.environ.get('DSD_INSECURE_COOKIES') != '1',
+)
 
 FINDINGS_LOG   = '/home/dave/projects/server-scripts/audit-findings.log'
 FINDINGS_ROTATED_GLOB = '/home/dave/projects/server-scripts/audit-findings.log.*.gz'
@@ -101,7 +124,7 @@ SEVERITY_RANK = {'CRITICAL': 3, 'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 def authed():
-    return request.cookies.get(COOKIE_NAME) == COOKIE_VAL
+    return session.get('authed') is True
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1293,6 +1316,169 @@ def build_dashboard():
     }
 
 
+# ── Backup browser ────────────────────────────────────────────────────────────
+#
+# Read-only view of any step-1 backup item (backup.yml) as it was after any
+# kept night's run, from HD1. Reuses server-scripts' own history helpers so
+# this can't drift from how backup.py writes history and restore.py reads it
+# (see BACKUP-HISTORY-PLAN.md there): a night's manifest says which files
+# existed; each one's version from that night is either still in the mirror
+# or in changes/<first later night that replaced or deleted it>/.
+
+SERVER_SCRIPTS_DIR = '/home/dave/projects/server-scripts'
+BACKUP_MANAGED_ROOT = '/mnt/portable1/managed/'
+BACKUP_KEEP_NIGHTS = 7
+# Items that are credentials rather than data: one web login away from every
+# key on the server is too close. restore.py still reaches them.
+BACKUP_HIDDEN_DESTS = {
+    '/mnt/portable1/managed/config/secrets/',
+    '/mnt/portable1/managed/config/ssh-backup/',
+    '/mnt/portable1/managed/config/cloudflared/',
+    '/mnt/portable1/managed/config/whatsapp-bot-auth/',
+}
+BACKUP_SEARCH_LIMIT = 500
+
+import sys as _sys
+if SERVER_SCRIPTS_DIR not in _sys.path:
+    _sys.path.insert(0, SERVER_SCRIPTS_DIR)
+import backup as _bk  # noqa: E402  (server-scripts' backup.py)
+
+_manifest_cache = {}
+
+
+def human_size(n):
+    if n is None or n < 0:
+        return '—'
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024 or unit == 'GB':
+            return f'{n:.0f} {unit}' if unit == 'B' else f'{n:.1f} {unit}'
+        n /= 1024
+
+
+def backup_items():
+    """[(slug, action)] for every browsable step-1 item, in backup.yml order."""
+    import yaml
+    with open(os.path.join(SERVER_SCRIPTS_DIR, 'backup.yml')) as f:
+        actions = yaml.safe_load(f).get('actions', [])
+    items = []
+    for a in actions:
+        if (a.get('enabled') and a.get('history_dir') and a['type'] in ('rsync', 'rclone')
+                and a['destination'].startswith(BACKUP_MANAGED_ROOT)
+                and a['destination'] not in BACKUP_HIDDEN_DESTS):
+            items.append((_bk.manifest_path(a, 'x').rsplit('/', 1)[1][:-len('.tsv.gz')], a))
+    return items
+
+
+def backup_item_label(name):
+    """'Rclone Google Drive (Annie)' -> 'Google Drive: Annie', 'Rsync ~/scratch
+    to portable HD #1' -> '~/scratch': the job names describe the copy step,
+    the page only needs to say what was copied."""
+    m = re.fullmatch(r'Rclone Google Drive \((.+)\)', name)
+    if m:
+        return f'Google Drive: {m.group(1)}'
+    name = re.sub(r'^(Backup|Rsync|Copy) ', '', name)
+    name = re.sub(r' to portable HD #1$', '', name)
+    first = name.split(' ', 1)[0]
+    # Capitalise 'alobear', but leave deliberate casing like 'qBittorrent'
+    if first.islower():
+        name = name[:1].upper() + name[1:]
+    return name
+
+
+def backup_item(slug):
+    return next((a for s, a in backup_items() if s == slug), None)
+
+
+def backup_nights(action):
+    """Nights (newest first) that have a manifest for this item, i.e. can be
+    browsed, limited to the kept window."""
+    nights = _bk.list_nights('local', _bk.history_root(action))
+    have = [n for n in nights if os.path.exists(_bk.manifest_path(action, n))]
+    return list(reversed(have))[:BACKUP_KEEP_NIGHTS]
+
+
+def _night_manifest(action, night):
+    key = (action['name'], night)
+    if key not in _manifest_cache:
+        if len(_manifest_cache) > 20:
+            _manifest_cache.clear()
+        _manifest_cache[key] = _bk.read_manifest(action, night)
+    return _manifest_cache[key]
+
+
+def _clean_rel(rel):
+    """Normalise a user-supplied relative path; None if it tries to escape."""
+    rel = (rel or '').strip('/')
+    parts = [p for p in rel.split('/') if p not in ('', '.')]
+    if any(p == '..' for p in parts):
+        return None
+    return '/'.join(parts)
+
+
+def backup_listing(action, night, rel):
+    """(folders, files) directly inside rel as of night ('now' for the live
+    mirror). folders: [name]; files: [(name, size)]. None if rel isn't a
+    folder that existed then."""
+    if night == 'now':
+        base = os.path.join(action['destination'], rel)
+        if not os.path.isdir(base):
+            # An item added to backup.yml has no folder until its first run
+            return ([], []) if not rel else None
+        folders, files = [], []
+        for e in os.scandir(base):
+            if e.is_dir(follow_symlinks=False):
+                folders.append(e.name)
+            elif e.is_file(follow_symlinks=False):
+                files.append((e.name, e.stat(follow_symlinks=False).st_size))
+        return sorted(folders, key=str.lower), sorted(files, key=lambda f: f[0].lower())
+    manifest = _night_manifest(action, night)
+    if manifest is None:
+        return None
+    prefix = rel + '/' if rel else ''
+    folders, files = set(), []
+    for path, size in manifest.items():
+        if not path.startswith(prefix):
+            continue
+        rest = path[len(prefix):]
+        if '/' in rest:
+            folders.add(rest.split('/', 1)[0])
+        else:
+            files.append((rest, size))
+    if rel and not folders and not files:
+        return None
+    return sorted(folders, key=str.lower), sorted(files, key=lambda f: f[0].lower())
+
+
+def backup_search(action, night, query):
+    """[(relpath, size)] whose file name contains query (case-insensitive)."""
+    q = query.lower()
+    if night == 'now':
+        rows = ((p, s) for p, s, _ in _bk.list_files('local', action['destination']))
+    else:
+        rows = (_night_manifest(action, night) or {}).items()
+    hits = [(p, s) for p, s in rows if q in os.path.basename(p).lower()]
+    return sorted(hits, key=lambda h: h[0].lower())[:BACKUP_SEARCH_LIMIT]
+
+
+def backup_locate(action, night, rel):
+    """Absolute path on HD1 holding rel as it was after night, or None."""
+    candidates = []
+    if night != 'now':
+        manifest = _night_manifest(action, night)
+        if manifest is None or rel not in manifest:
+            return None
+        tmpl = _bk.history_template(action)
+        for n in _bk.list_nights('local', _bk.history_root(action)):
+            if n > night:
+                candidates.append((os.path.join(tmpl.replace('{date}', n), rel), tmpl.replace('{date}', n)))
+    candidates.append((os.path.join(action['destination'], rel), action['destination']))
+    for path, root in candidates:
+        # realpath on both sides: a symlink in a backup must not lead out of it
+        if os.path.isfile(path) and os.path.realpath(path).startswith(os.path.realpath(root) + os.sep):
+            return path
+    return None
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -1437,23 +1623,86 @@ def security_detail(when):
     return render_template('security_detail.html', not_found=False, **detail)
 
 
+def _backup_night_options(action):
+    """[(value, label)] for the 'when' drop-down: the live backup, then each
+    earlier kept night."""
+    today = datetime.now().date()
+    opts = [('now', 'Now (latest backup)')]
+    for n in backup_nights(action):
+        d = datetime.strptime(n, '%Y-%m-%d').date()
+        ago = (today - d).days
+        if ago <= 0:
+            continue
+        opts.append((n, f'{ago} day{"s" if ago != 1 else ""} ago ({d.strftime("%a %-d %b")})'))
+    return opts
+
+
+@app.route('/backups')
+def backups_page():
+    if not authed():
+        return redirect(url_for('login'))
+    items = [{'slug': s, 'name': backup_item_label(a['name']), 'nights': _backup_night_options(a)}
+             for s, a in backup_items()]
+    items.sort(key=lambda it: it['name'].lower())
+    return render_template('backups.html', items=items)
+
+
+@app.route('/backups/browse/<slug>/<night>/', defaults={'rel': ''})
+@app.route('/backups/browse/<slug>/<night>/<path:rel>')
+def backups_browse(slug, night, rel):
+    if not authed():
+        return redirect(url_for('login'))
+    action = backup_item(slug)
+    rel = _clean_rel(rel)
+    if action is None or rel is None or (night != 'now' and night not in backup_nights(action)):
+        return render_template('backup_browse.html', not_found=True, slug=slug, night=night), 404
+    label = dict(_backup_night_options(action)).get(night, night)
+    query = (request.args.get('q') or '').strip()
+    ctx = dict(not_found=False, slug=slug, night=night, night_label=label, item_name=action['name'],
+               rel=rel, crumbs=rel.split('/') if rel else [], query=query, human_size=human_size)
+    ctx['item_name'] = backup_item_label(action['name'])
+    if query:
+        return render_template('backup_browse.html', hits=backup_search(action, night, query), **ctx)
+    listing = backup_listing(action, night, rel)
+    if listing is None:
+        return render_template('backup_browse.html', **dict(ctx, not_found=True)), 404
+    folders, files = listing
+    return render_template('backup_browse.html', folders=folders, files=files, **ctx)
+
+
+@app.route('/backups/file/<slug>/<night>/<path:rel>')
+def backups_file(slug, night, rel):
+    if not authed():
+        return redirect(url_for('login'))
+    action = backup_item(slug)
+    rel = _clean_rel(rel)
+    if action is None or not rel or (night != 'now' and night not in backup_nights(action)):
+        return 'Not found', 404
+    path = backup_locate(action, night, rel)
+    if path is None:
+        # Possible for a file the Drive leg's --track-renames moved; HD1's own
+        # history has no renames, so this should be rare here
+        return 'That version of the file is no longer in the backup.', 404
+    return send_file(path, as_attachment=True, download_name=os.path.basename(rel))
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
     if request.method == 'POST':
-        if request.form.get('password') == PASSWORD:
-            resp = make_response(redirect(url_for('index')))
-            resp.set_cookie(COOKIE_NAME, COOKIE_VAL, httponly=True, samesite='Lax')
-            return resp
+        if hmac.compare_digest(request.form.get('password', ''), PASSWORD):
+            session.clear()
+            session['authed'] = True
+            session.permanent = True
+            return redirect(url_for('index'))
         error = 'Wrong password.'
     return render_template('login.html', error=error)
 
 
 @app.route('/logout')
 def logout():
-    resp = make_response(redirect(url_for('login')))
-    resp.delete_cookie(COOKIE_NAME)
-    return resp
+    session.clear()
+    return redirect(url_for('login'))
 
 
 if __name__ == '__main__':

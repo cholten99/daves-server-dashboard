@@ -23,13 +23,28 @@ a pattern to copy for anything multi-user or public.
 | `/` | Main dashboard: Bluesky followers, site traffic, security audit, backups, media-resize status, cron jobs. Polls `/api/data` every 20s and patches the DOM in place (see `updateX()` functions in `index.html`). |
 | `/site-traffic`, `/backup/<run_id>`, `/security/<when>` | Drill-down detail pages for their respective dashboard sections. |
 | `/projects` | The Projects board (see below). Renders once server-side with the full board embedded as JSON; no polling — every user action calls its own API endpoint and patches local state/DOM directly. |
-| `/login`, `/logout` | Password form / cookie clear. |
+| `/backups`, `/backups/browse/<item>/<night>/<path>`, `/backups/file/<item>/<night>/<path>` | Backup browser (see below). |
+| `/login`, `/logout` | Password form / session clear. The password and session-signing key are read from `/home/dave/secrets/dashboard_password` and `dashboard_secret_key` at startup (until 2026-10-22 both were hard-coded defaults in this public repo, and login was a fixed, forgeable cookie). |
 
 Most main-dashboard data sources are **read-only** from this app's point of
 view — it reads state another process owns (media-resize's SQLite DB and
 `/api/data`, site-traffic's SQLite DB, the security-audit log, backup JSON
 logs, `crontab -l`). The Projects board is the one exception: this app owns
 that schema outright.
+
+## Backup browser (`/backups`)
+
+Read-only view of any step-1 item in server-scripts' `backup.yml`, as it was
+after any of the last 7 nightly runs, with downloads and a filename search.
+Pick the item and night from two drop-downs. It reads HD1 directly and uses server-scripts' own
+`backup.py` helpers (imported from `/home/dave/projects/server-scripts`, hence
+PyYAML in this venv), so it reads history exactly the way `backup.py` writes
+it: that night's manifest lists what existed; each file's version from that
+night is in `changes/<first later night>/` if something replaced or deleted it
+since, else still in the mirror. Credential items (secrets store, SSH keys,
+Cloudflare tunnel, WhatsApp auth) are deliberately left out of the list;
+`restore.py` still reaches them. Paths are normalised, `..` is refused, and a
+served file's real path must stay inside its backup folder.
 
 ## Projects board (`/projects`)
 
