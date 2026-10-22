@@ -1,5 +1,6 @@
 import gzip
 import glob
+import hashlib
 import hmac
 import html as html_lib
 import http.cookiejar
@@ -96,7 +97,9 @@ _bluesky_cache = {'fetched_at': None, 'data': []}
 # each worker, caches for 30s) -- rather than duplicating that, log into its own
 # /api/data as a regular authenticated client and read the numbers back out.
 MR_BASE_URL  = 'http://127.0.0.1:5001'
-MR_PASSWORD  = os.environ.get('MEDIA_RESIZE_PASSWORD', 'makethemsmaller')
+# media-resize's own login uses the dashboard password since 2026-10-22 (one
+# password for everything); its old one was public in this repo.
+MR_PASSWORD  = PASSWORD
 # A Mac worker toggle can take up to ~16s server-side (two SSH attempts --
 # meshnet then LAN fallback -- at up to 8s each), plus overhead. This must
 # stay comfortably above that; see mr_toggle_worker() for why a too-short
@@ -125,6 +128,40 @@ SEVERITY_RANK = {'CRITICAL': 3, 'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
 
 def authed():
     return session.get('authed') is True
+
+
+# Single sign-on for the other *.bowsy.co.uk admin tools (Sonarr, Radarr,
+# Prowlarr, qBittorrent, media-resize): logging in here also sets this cookie
+# on the parent domain, and Apache's bowsy-sso-gate in front of each of those
+# vhosts lets a request through only if it carries it (see
+# server-scripts/apache/). Derived from the secret key rather than stored
+# separately, so rotating dashboard_secret_key rotates it too -- after which
+# server-scripts/apache/install-sso-token.sh must be re-run so Apache agrees.
+SSO_COOKIE = 'bowsy_sso'
+SSO_DOMAIN = '.bowsy.co.uk'
+SSO_TOKEN = hmac.new(app.secret_key.encode(), b'bowsy-sso-v1', hashlib.sha256).hexdigest()
+
+
+def _safe_next(url):
+    """url if it's an https page on one of our own subdomains, else None --
+    an open redirect after login would be a phishing aid."""
+    try:
+        u = urllib.parse.urlparse(url or '')
+    except ValueError:
+        return None
+    host = (u.hostname or '').lower()
+    if u.scheme == 'https' and (host == 'bowsy.co.uk' or host.endswith('.bowsy.co.uk')):
+        return url
+    return None
+
+
+@app.after_request
+def _keep_sso_cookie(resp):
+    # Also covers sessions that logged in before SSO existed
+    if authed() and request.cookies.get(SSO_COOKIE) != SSO_TOKEN:
+        resp.set_cookie(SSO_COOKIE, SSO_TOKEN, max_age=30 * 86400, domain=SSO_DOMAIN,
+                        secure=app.config['SESSION_COOKIE_SECURE'], httponly=True, samesite='Lax')
+    return resp
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1689,12 +1726,15 @@ def backups_file(slug, night, rel):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
+    next_url = _safe_next(request.args.get('next'))
+    if authed():
+        return redirect(next_url or url_for('index'))
     if request.method == 'POST':
         if hmac.compare_digest(request.form.get('password', ''), PASSWORD):
             session.clear()
             session['authed'] = True
             session.permanent = True
-            return redirect(url_for('index'))
+            return redirect(next_url or url_for('index'))
         error = 'Wrong password.'
     return render_template('login.html', error=error)
 
@@ -1702,7 +1742,9 @@ def login():
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    resp = redirect(url_for('login'))
+    resp.delete_cookie(SSO_COOKIE, domain=SSO_DOMAIN)
+    return resp
 
 
 if __name__ == '__main__':
