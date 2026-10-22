@@ -156,6 +156,16 @@ def _safe_next(url):
 
 
 @app.after_request
+def _no_referrer(resp):
+    # qBittorrent's CSRF check rejects any page load whose Referer is another
+    # site, so following its link from here (or being sent back to it after
+    # logging in) got a bare "Unauthorized". Sending no Referer keeps its
+    # CSRF protection on; nothing on these pages relies on Referer anyway.
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
+
+
+@app.after_request
 def _keep_sso_cookie(resp):
     # Also covers sessions that logged in before SSO existed
     if authed() and request.cookies.get(SSO_COOKIE) != SSO_TOKEN:
