@@ -245,7 +245,7 @@
 
   <!-- ── Cron Jobs ── -->
   <section>
-    <h2 class="collapsible">Cron Jobs<span class="chevron">▾</span></h2>
+    <h2 class="collapsible">Scheduled Jobs<span class="chevron">▾</span></h2>
     <div id="jobs-content">
       <table>
         <tr><th>Job</th><th>Type</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
@@ -260,6 +260,7 @@
             {% elif c.status == 'warning' %}<span class="badge badge-warning" title="{{ c.message }}">{{ c.message }}</span>
             {% elif c.status == 'fail' %}<span class="badge fail" title="{{ c.message }}">Failed</span>
             {% elif c.status == 'see_above' %}<span class="badge badge-off" title="{{ c.message }}">See above</span>
+            {% elif c.status == 'skipped' %}<span class="badge badge-off" title="{{ c.message }}">Skipped</span>
             {% else %}<span class="badge badge-off" title="{{ c.message }}">Unknown</span>{% endif %}
           </td>
         </tr>
@@ -376,6 +377,7 @@ function updateJobs(jobs) {
       : c.status === 'warning' ? `<span class="badge badge-warning" title="${c.message}">${c.message}</span>`
       : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
       : c.status === 'see_above' ? `<span class="badge badge-off" title="${c.message}">See above</span>`
+      : c.status === 'skipped' ? `<span class="badge badge-off" title="${c.message}">Skipped</span>`
       : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
     const name = c.link ? `<a href="${c.link}" target="_blank" style="color:#9cf;text-decoration:none">${c.description}</a>` : c.description;
     return `<td class="file" title="${c.command}">${name}</td><td class="dim">${c.type}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;

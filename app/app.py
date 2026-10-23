@@ -963,7 +963,7 @@ def get_cron_jobs():
             status = (log_path and _last_job_status(log_path)) or \
                 {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
         jobs.append({
-            'type': 'Local',
+            'type': 'Crontab',
             'link': None,
             'schedule': schedule,
             'schedule_human': _cron_schedule_human(schedule),
@@ -973,6 +973,138 @@ def get_cron_jobs():
         })
     return jobs
 
+
+
+# systemd's single-unit time spans as `systemctl show` prints them, e.g. "6h",
+# "1min", "1d 12h" -- shown as-is, just with the property name translated.
+TIMER_MONOTONIC_LABELS = {
+    'OnBootUSec': 'after boot',
+    'OnStartupUSec': 'after boot',
+    'OnActiveUSec': 'after timer start',
+    'OnUnitActiveUSec': 'since last run',
+    'OnUnitInactiveUSec': 'since last finish',
+}
+DOW_NAMES = {'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'}
+
+
+def _calendar_human(spec):
+    """Best-effort plain-English rendering of one systemd OnCalendar=
+    expression in the normalized form `systemctl show` prints
+    ("[DOW ]Y-M-D H:M:S"). Covers the daily/weekly/monthly/every-N-minutes
+    shapes this box's timers use; anything else falls back to the raw spec."""
+    parts = spec.split()
+    dow = parts[0] if len(parts) == 3 and parts[0].split(',')[0][:3] in DOW_NAMES else None
+    if dow:
+        parts = parts[1:]
+    if len(parts) != 2:
+        return spec
+    date, time = parts
+    hms = time.split(':')
+    if len(hms) != 3:
+        return spec
+    hour, minute = hms[0], hms[1]
+    if hour == '*' and '/' in minute:
+        return f'Every {minute.split("/")[1]} minutes'
+    if hour == '*' and all(m.isdigit() for m in minute.split(',')):
+        when = 'hourly at ' + ', '.join(f':{int(m):02d}' for m in minute.split(','))
+    elif minute.isdigit() and all(h.isdigit() for h in hour.split(',')):
+        when = 'at ' + ', '.join(f'{int(h):02d}:{int(minute):02d}' for h in hour.split(','))
+    else:
+        return spec
+    if date == '*-*-*':
+        prefix = f'Weekly ({dow})' if dow else ('Daily' if not when.startswith('hourly') else '')
+    elif date.endswith('-01') and date.count('*') == 2:
+        prefix = 'Monthly'
+    else:
+        return spec
+    text = f'{prefix} {when}'.strip()
+    return text[0].upper() + text[1:]
+
+
+def _systemctl_show(units, props, user=False):
+    """`systemctl show` for several units in one call, parsed into a dict per
+    unit keyed by Id."""
+    cmd = ['systemctl'] + (['--user'] if user else []) + ['show', '-p', ','.join(['Id'] + props), '--'] + units
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    result = {}
+    for block in out.strip().split('\n\n'):
+        d = dict(line.split('=', 1) for line in block.splitlines() if '=' in line)
+        if 'Id' in d:
+            result[d['Id']] = d
+    return result
+
+
+def get_systemd_timers():
+    """Every systemd timer on the box (system and dave's user ones) as rows
+    for the same table as get_cron_jobs(), since scheduled work lives in both
+    places -- e.g. apt-daily-upgrade.timer, the unattended upgrades whose
+    service restarts took the box offline on 2026-10-23, never showed up in
+    crontab. Status comes from the activated service's last Result; a run
+    skipped by an ExecCondition/Condition (e.g. upgrade-guard.sh refusing
+    while a backup is active) shows as a warning rather than a failure."""
+    jobs = []
+    for user in (False, True):
+        cmd = ['systemctl'] + (['--user'] if user else []) + ['list-timers', '--all', '--no-pager', '-o', 'json']
+        try:
+            timers = json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout or '[]')
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if not timers:
+            continue
+        timer_props = _systemctl_show([t['unit'] for t in timers],
+                                      ['TimersCalendar', 'TimersMonotonic', 'RandomizedDelayUSec'], user)
+        svc_props = _systemctl_show([t['activates'] for t in timers],
+                                    ['Description', 'Result', 'ConditionResult'], user)
+        for t in timers:
+            tp = timer_props.get(t['unit'], {})
+            sp = svc_props.get(t['activates'], {})
+            raw, human = [], []
+            for m in re.finditer(r'\{ OnCalendar=(.*?) ;', tp.get('TimersCalendar', '')):
+                raw.append(m.group(1))
+                human.append(_calendar_human(m.group(1)))
+            for m in re.finditer(r'\{ (On\w+USec)=(.*?) ;', tp.get('TimersMonotonic', '')):
+                raw.append(f'{m.group(1)}={m.group(2)}')
+                label = TIMER_MONOTONIC_LABELS.get(m.group(1), m.group(1))
+                human.append(f'Every {m.group(2)} {label}' if m.group(1).startswith('OnUnit') else f'{m.group(2)} {label}')
+            delay = tp.get('RandomizedDelayUSec', '0')
+            schedule_human = '; '.join(human) or '—'
+            if delay not in ('0', ''):
+                schedule_human += f' (+ up to {delay} random)'
+            last_run = datetime.fromtimestamp(t['last'] / 1e6).isoformat() if t.get('last') else None
+            result = sp.get('Result', '')
+            if not last_run:
+                status, message = 'unknown', 'Not yet run'
+            elif sp.get('ConditionResult') == 'no' or result in ('exec-condition', 'condition'):
+                # Neutral, not a warning: several stock timers (fstrim,
+                # e2scrub, xfs_scrub) skip by design on every run.
+                status, message = 'skipped', 'Skipped (a start condition was not met)'
+            elif result == 'success':
+                status, message = 'ok', 'Succeeded'
+            else:
+                status, message = 'fail', f'Result: {result or "unknown"}'
+            jobs.append({
+                'type': 'systemd timer (user)' if user else 'systemd timer',
+                'link': None,
+                'schedule': ' ; '.join(raw),
+                'schedule_human': schedule_human,
+                'command': f"{t['unit']} -> {t['activates']}",
+                'description': sp.get('Description') or t['unit'],
+                'last_run': last_run,
+                'status': status,
+                'message': message,
+            })
+    # Some units share a Description (sysstat-collect/-summary are both
+    # "system activity accounting tool"); tell those apart by unit name.
+    counts = {}
+    for j in jobs:
+        counts[j['description']] = counts.get(j['description'], 0) + 1
+    for j in jobs:
+        if counts[j['description']] > 1:
+            j['description'] += f" ({j['command'].split(' -> ')[0]})"
+    return sorted(jobs, key=lambda j: j['description'].lower())
 
 CC_ROUTINES_PATH = os.path.join(os.path.dirname(__file__), 'cc_routines.json')
 
@@ -1359,7 +1491,7 @@ def build_dashboard():
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
         'media_resize': get_media_resize_status(),
-        'cron_jobs': get_cron_jobs() + get_cc_routines(),
+        'cron_jobs': get_cron_jobs() + get_systemd_timers() + get_cc_routines(),
         'processes': get_running_processes(),
     }
 
