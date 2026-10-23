@@ -908,6 +908,7 @@ CRON_JOB_INFO = [
     ('selfheal.py',                'Media-resize self-heal (auto-fix stuck jobs)',                     '/var/www/media-resize/logs/selfheal-cron.log'),
     ('media-resize-remote-watchdog.sh', 'Media-resize remote worker watchdog',                         '/home/dave/projects/server-scripts/media-resize-remote-watchdog.log'),
     ('remote-control/new-instance.sh', 'Start a Claude Code Remote Control instance after reboot',     '/home/dave/logs/claude-remote-control/reboot-start.log'),
+    ('nordvpn-watchdog.sh',         'NordVPN watchdog (reconnect if internet lost while VPN "Connected")', '/home/dave/logs/nordvpn-watchdog.log'),
     # Writes a fresh timestamped file per run rather than one fixed path --
     # _last_job_status() resolves the glob to the most recently modified match.
     ('update_rebuild_docs.py',     'Rebuild-docs drift check (SERVER-BACKUP.md / home-pc-backup.md)',  os.path.join(BACKUP_LOGS_DIR, '*-rebuild-docs.log')),
