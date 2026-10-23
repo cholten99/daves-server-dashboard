@@ -15,6 +15,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 
+from markupsafe import Markup
 from flask import (Flask, request, redirect, url_for, render_template, jsonify,
                    send_file, session)
 
@@ -638,6 +639,114 @@ def _cron_schedule_human(schedule):
     return schedule
 
 
+# ── System drift reports ──────────────────────────────────────────────────────
+# server-scripts/update_rebuild_docs.py (cron 06:15) has Claude re-check the
+# system-rebuild docs against the live machines, fix what's drifted, and end
+# its log with "[final summary] ## Summary ... ## Action needed ...". Each run
+# writes logs/<run_id>-rebuild-docs.log; a run with no final summary failed.
+
+DRIFT_DAYS = 7
+DRIFT_LOG_SUFFIX = '-rebuild-docs.log'
+DRIFT_RUN_ID_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$')
+DRIFT_SUMMARY_MARKER = '[final summary] '
+
+
+def _md_to_html(text):
+    """Just enough Markdown for the summaries Claude writes: '#' headings,
+    nested '-' bullets, **bold** and `code`. Every line is HTML-escaped
+    before any markup is added, so nothing in a log can inject HTML."""
+    def inline(s):
+        s = html_lib.escape(s)
+        s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+        return re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+    out, depth = [], 0
+    for line in text.splitlines():
+        m = re.match(r'^(\s*)[-*] (.*)$', line)
+        if m:
+            level = len(m.group(1)) // 2 + 1
+            while depth < level:
+                out.append('<ul>')
+                depth += 1
+            while depth > level:
+                out.append('</ul>')
+                depth -= 1
+            out.append(f'<li>{inline(m.group(2))}</li>')
+            continue
+        while depth:
+            out.append('</ul>')
+            depth -= 1
+        h = re.match(r'^#+\s*(.*)$', line)
+        if h:
+            out.append(f'<h3>{inline(h.group(1))}</h3>')
+        elif line.strip():
+            out.append(f'<p>{inline(line)}</p>')
+    out.extend(['</ul>'] * depth)
+    return Markup(''.join(out))
+
+
+def _parse_drift_log(path):
+    run_id = os.path.basename(path)[:-len(DRIFT_LOG_SUFFIX)]
+    try:
+        text = open(path, errors='replace').read()
+    except OSError:
+        return None
+    started = datetime.strptime(run_id, '%Y-%m-%dT%H-%M-%S')
+    report = {'run_id': run_id, 'started': started, 'when': started.strftime('%Y-%m-%d %H:%M'), 'log': text}
+    idx = text.find(DRIFT_SUMMARY_MARKER)
+    if idx < 0:
+        last = next((l for l in reversed(text.splitlines()) if l.strip()), 'No output')
+        report.update(status='failed', summary='', actions=[], headline=last)
+        return report
+    summary = text[idx + len(DRIFT_SUMMARY_MARKER):].strip()
+    # "## Action needed" bullets, minus the "- None" placeholder.
+    actions, in_actions = [], False
+    for line in summary.splitlines():
+        if line.startswith('#'):
+            in_actions = 'action needed' in line.lower()
+        elif in_actions and line.startswith('- ') and line[2:].strip().lower() != 'none':
+            actions.append(line[2:].strip())
+    bullets = [l[2:].strip() for l in summary.splitlines() if l.startswith('- ')]
+    if summary.startswith('API Error') or not bullets:
+        # Claude's own error text lands in the summary slot when the run died.
+        report.update(status='failed', summary=summary, actions=[], headline=summary.splitlines()[0])
+        return report
+    if actions:
+        status, headline = 'action', actions[0]
+    elif re.search(r'\bCommitted as\b', summary):
+        status, headline = 'updated', bullets[0]
+    else:
+        status, headline = 'ok', bullets[0]
+    report.update(status=status, summary=summary, actions=actions,
+                  headline=re.sub(r'[*`]', '', headline))
+    return report
+
+
+def get_drift_reports(days=DRIFT_DAYS):
+    """Light rows for the System page table, newest first."""
+    cutoff = datetime.now() - timedelta(days=days)
+    rows = []
+    for path in glob.glob(os.path.join(BACKUP_LOGS_DIR, '*' + DRIFT_LOG_SUFFIX)):
+        run_id = os.path.basename(path)[:-len(DRIFT_LOG_SUFFIX)]
+        if not DRIFT_RUN_ID_RE.match(run_id):
+            continue
+        r = _parse_drift_log(path)
+        if r and r['started'] >= cutoff:
+            rows.append(dict({k: r[k] for k in ('run_id', 'when', 'status', 'headline')}, action_count=len(r['actions'])))
+    return sorted(rows, key=lambda r: r['run_id'], reverse=True)
+
+
+def get_drift_report_detail(run_id):
+    if not DRIFT_RUN_ID_RE.match(run_id):
+        return None
+    path = os.path.join(BACKUP_LOGS_DIR, run_id + DRIFT_LOG_SUFFIX)
+    if not os.path.isfile(path):
+        return None
+    r = _parse_drift_log(path)
+    if r:
+        r['summary_html'] = _md_to_html(r['summary']) if r['summary'] else ''
+    return r
+
+
 # Human descriptions for known cron commands, matched by substring against
 # the full command line -- keyed on a stable bit of the path/script name so
 # unrelated flags/redirects in the crontab entry don't break the match. Log
@@ -1254,6 +1363,7 @@ def build_dashboard():
 def build_system():
     return {
         'security': get_security_findings(),
+        'drift': get_drift_reports(),
         'cron_jobs': get_cron_jobs() + get_systemd_timers() + get_cc_routines(),
         'processes': get_running_processes(),
     }
@@ -1570,6 +1680,16 @@ def security_detail(when):
     if detail is None:
         return render_template('security_detail.html', when=when, not_found=True)
     return render_template('security_detail.html', not_found=False, **detail)
+
+
+@app.route('/drift/<run_id>')
+def drift_detail(run_id):
+    if not authed():
+        return redirect(url_for('login'))
+    detail = get_drift_report_detail(run_id)
+    if detail is None:
+        return render_template('drift_detail.html', run_id=run_id, not_found=True), 404
+    return render_template('drift_detail.html', not_found=False, **detail)
 
 
 def _backup_night_options(action):

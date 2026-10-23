@@ -98,6 +98,32 @@
     </div>
   </section>
 
+  <!-- ── System drift reports ── -->
+  <section>
+    <h2 class="collapsible">System drift reports (last 7 days)<span class="chevron">▾</span></h2>
+    <div id="drift-content">
+      {% if drift %}
+      <table>
+        <tr><th>Run</th><th>Status</th><th>Summary</th></tr>
+        {% for d in drift %}
+        <tr>
+          <td class="dim"><a href="/drift/{{ d.run_id }}" target="_blank" style="color:#9cf;text-decoration:none">{{ d.when }}</a></td>
+          <td>
+            {% if d.status == 'failed' %}<span class="badge fail">Failed</span>
+            {% elif d.status == 'action' %}<span class="badge badge-warning">Action needed ({{ d.action_count }})</span>
+            {% elif d.status == 'updated' %}<span class="badge badge-active">Docs updated</span>
+            {% else %}<span class="badge badge-ok">No drift</span>{% endif %}
+          </td>
+          <td class="dim" title="{{ d.headline }}">{{ d.headline | truncate(110) }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No drift reports in the last 7 days.</p>
+      {% endif %}
+    </div>
+  </section>
+
   <!-- ── Scheduled Jobs ── -->
   <section>
     <h2 class="collapsible">Scheduled Jobs<span class="chevron">▾</span></h2>

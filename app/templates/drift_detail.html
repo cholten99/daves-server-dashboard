@@ -1,0 +1,63 @@
+{% import '_nav.html' as nav %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drift report — {{ when or run_id }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #c8c8c8; padding: 1.5rem; }
+    h1 { font-size: 1.2rem; color: #eee; margin-bottom: .3rem; }
+    .sub { color: #999; font-size: .85rem; margin-bottom: 1.5rem; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; vertical-align: middle; }
+    .badge-ok      { background: #1a3a1a; color: #6d6; }
+    .badge-active  { background: #1a2a3e; color: #69c; }
+    .badge-warning { background: #2a2a1a; color: #ca6; }
+    .badge.fail    { background: #3a1a1a; color: #e55; }
+    .report { background: #272727; border-radius: 6px; padding: 1rem 1.25rem; max-width: 60rem; line-height: 1.55; font-size: .92rem; }
+    .report h3 { font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin: 1rem 0 .5rem; }
+    .report h3:first-child { margin-top: 0; }
+    .report ul { padding-left: 1.3rem; margin: .25rem 0; }
+    .report li { margin: .2rem 0; }
+    .report p { margin: .4rem 0; }
+    .report code { background: #1e1e1e; padding: .05rem .3rem; border-radius: 3px; font-size: .85em; overflow-wrap: anywhere; }
+    .report strong { color: #eee; }
+    details { margin-top: 1.5rem; max-width: 60rem; }
+    summary { cursor: pointer; color: #999; font-size: .85rem; }
+    pre { background: #272727; border-radius: 6px; padding: 1rem; margin-top: .5rem; font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; color: #bbb; }
+    a.back { color: #69c; text-decoration: none; font-size: .85rem; }
+    a.back:hover { color: #9cf; }
+  </style>
+  {{ nav.css() }}
+</head>
+<body>
+  {{ nav.menu() }}
+  {% if not_found %}
+  <h1>Drift report — {{ run_id }}</h1>
+  <p class="sub">This run's log isn't available. Logs are kept for 30 days.</p>
+  {% else %}
+  <h1>Drift report — {{ when }}
+    {% if status == 'failed' %}<span class="badge fail">Failed</span>
+    {% elif status == 'action' %}<span class="badge badge-warning">Action needed ({{ actions|length }})</span>
+    {% elif status == 'updated' %}<span class="badge badge-active">Docs updated</span>
+    {% else %}<span class="badge badge-ok">No drift</span>{% endif %}
+  </h1>
+  <p class="sub">Nightly check of the system-rebuild docs against the live machines (update_rebuild_docs.py)</p>
+
+  {% if summary_html %}
+  <div class="report">{{ summary_html }}</div>
+  {% else %}
+  <div class="report"><p>The run didn't finish, so there's no report. Last output:</p><p><code>{{ headline }}</code></p></div>
+  {% endif %}
+
+  <details>
+    <summary>Full run log</summary>
+    <pre>{{ log }}</pre>
+  </details>
+  {% endif %}
+
+  <p style="margin-top:1.5rem"><a class="back" href="javascript:window.close()">Close this tab</a></p>
+{{ nav.js() }}
+</body>
+</html>
