@@ -3,7 +3,6 @@ import glob
 import hashlib
 import hmac
 import html as html_lib
-import http.cookiejar
 import json
 import os
 import re
@@ -13,10 +12,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from html.parser import HTMLParser
 
-from guessit import guessit as _guessit
 from flask import (Flask, request, redirect, url_for, render_template, jsonify,
                    send_file, session)
 
@@ -51,8 +49,6 @@ app.config.update(
 FINDINGS_LOG   = '/home/dave/projects/server-scripts/audit-findings.log'
 FINDINGS_ROTATED_GLOB = '/home/dave/projects/server-scripts/audit-findings.log.*.gz'
 BACKUP_LOGS_DIR = '/home/dave/projects/server-scripts/logs'
-MR_DB_PATH      = '/var/www/media-resize/state.db'
-MR_WORKERS_PATH = '/var/www/media-resize/workers.json'
 
 BOWSY_FEED_LOG  = '/home/dave/logs/bowsy-feed.log'
 
@@ -92,21 +88,6 @@ BLUESKY_ACCOUNTS = [
 BLUESKY_CACHE_TTL = timedelta(minutes=15)
 _bluesky_cache = {'fetched_at': None, 'data': []}
 
-
-# media-resize already computes per-worker encode progress/ETA itself (SSH-probes
-# each worker, caches for 30s) -- rather than duplicating that, log into its own
-# /api/data as a regular authenticated client and read the numbers back out.
-MR_BASE_URL  = 'http://127.0.0.1:5001'
-# media-resize's own login uses the dashboard password since 2026-10-22 (one
-# password for everything); its old one was public in this repo.
-MR_PASSWORD  = PASSWORD
-# A Mac worker toggle can take up to ~16s server-side (two SSH attempts --
-# meshnet then LAN fallback -- at up to 8s each), plus overhead. This must
-# stay comfortably above that; see mr_toggle_worker() for why a too-short
-# timeout here is actively harmful, not just slow.
-MR_TOGGLE_TIMEOUT = 25
-_mr_cookie_jar = http.cookiejar.CookieJar()
-_mr_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_mr_cookie_jar))
 
 SECURITY_DAYS = 6
 BACKUP_RUNS_LIMIT = 10
@@ -175,147 +156,6 @@ def _keep_sso_cookie(resp):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-_display_name_cache = {}
-
-
-def display_name(filename):
-    # Mirrors media-resize's own app.py so "in progress" filenames read the same
-    # in both places, e.g. "12.Angry.Men.1957.720p.YIFY.mp4" -> "12 Angry Men.mkv".
-    if filename in _display_name_cache:
-        return _display_name_cache[filename]
-    g = _guessit(filename)
-    title = g.get('title', filename)
-    season, episode = g.get('season'), g.get('episode')
-    # guessit returns a list instead of an int for multi-episode files, e.g.
-    # "S01E01-E02" -> episode=[1, 2] -- same bug exists in media-resize's own
-    # app.py; take the first episode of the range rather than crashing.
-    if isinstance(season, list):
-        season = season[0] if season else None
-    if isinstance(episode, list):
-        episode = episode[0] if episode else None
-    # guessit mis-parses British "Series N Episode M" naming: it finds the
-    # episode fine but shoves "Series N" into alternative_title instead of
-    # season. Recover the season from there rather than dropping it --
-    # E06-only would still collide between e.g. Series 1 Episode 6 and
-    # Series 2 Episode 6, the exact kind of clash this is meant to avoid.
-    if season is None:
-        alt = g.get('alternative_title') or ''
-        if isinstance(alt, list):
-            alt = alt[0] if alt else ''
-        m = re.search(r'(?i)\bseries\s*(\d+)\b', alt)
-        if m:
-            season = int(m.group(1))
-    part = g.get('part')
-    if isinstance(part, list):
-        part = part[0] if part else None
-    part_suffix = f'.Part{part}' if part is not None else ''
-    if season is not None and episode is not None:
-        name = f'{title} S{season:02d}E{episode:02d}{part_suffix}.mkv'
-    elif episode is not None:
-        name = f'{title} E{episode:02d}{part_suffix}.mkv'
-    else:
-        # Same fallback-to-original-stem fix applied to media-resize's own
-        # app.py on 2026-07-30: without it, unrelated files guessit reduces to
-        # the same bare title (no season/episode found) show up here as if
-        # they collide, even though media-resize's clean_stem() -- the function
-        # that actually decides the delivery path -- already keeps them
-        # distinct. Keep this mirrored fix in sync with the other copy.
-        name = f'{os.path.splitext(filename)[0]}.mkv'
-    _display_name_cache[filename] = name
-    return name
-
-
-def format_eta(seconds):
-    # Matches media-resize's own ETA formatting exactly (durationHtml() in its
-    # index.html) so the two pages read the same, right down to dropping
-    # seconds once the estimate is a minute or more.
-    if seconds is None:
-        return None
-    s = int(seconds)
-    if s < 60:
-        return f'{s}s'
-    if s < 3600:
-        return f'{s // 60}m'
-    h, m = s // 3600, (s % 3600) // 60
-    return f'{h}h {m}m' if m else f'{h}h'
-
-
-def _mr_login():
-    data = urllib.parse.urlencode({'password': MR_PASSWORD}).encode()
-    req = urllib.request.Request(f'{MR_BASE_URL}/login', data=data, method='POST')
-    _mr_opener.open(req, timeout=5).read()
-
-
-def mr_toggle_worker(name):
-    """POST to media-resize's own /toggle/<name> as an authenticated client --
-    this dashboard has no worker state of its own, it just proxies the click.
-
-    Toggle is a plain flip, not idempotent, so a timeout here must NOT be
-    retried as if it were a fresh attempt -- media-resize's own handler can
-    legitimately take close to MR_TOGGLE_TIMEOUT for a Mac worker (it tries
-    an SSH launchctl call over meshnet, then a LAN fallback, before giving
-    up), so a request that "times out" here may well have already flipped
-    the flag server-side. Retrying blindly (as this used to) sends a second
-    flip and cancels the first one out -- confirmed 2026-09-08, every click
-    on macair-new's Enable button produced a load-then-unload pair in
-    media-resize's toggle.log and left it right back where it started.
-
-    Only a genuine auth failure (session expired, 403) is safe to retry --
-    media-resize never touched its state for a rejected request."""
-    req = urllib.request.Request(f'{MR_BASE_URL}/toggle/{name}', data=b'', method='POST')
-    try:
-        _mr_opener.open(req, timeout=MR_TOGGLE_TIMEOUT).read()
-        return True
-    except urllib.error.HTTPError as e:
-        if e.code != 403:
-            return False
-        try:
-            _mr_login()
-            _mr_opener.open(req, timeout=MR_TOGGLE_TIMEOUT).read()
-            return True
-        except (urllib.error.URLError, OSError):
-            return False
-    except (urllib.error.URLError, OSError):
-        return False
-
-
-def get_media_resize_progress():
-    """worker name -> {pct, estimated, eta_s, eta_display, stale_s}, sourced live
-    from media-resize's own /api/data rather than re-probing workers over SSH.
-
-    media-resize used to expose a separate 'active' list (one entry per busy
-    worker); it now folds pct/estimated/eta_s/stale_s directly onto each entry
-    in 'workers' instead (its dashboard merged a duplicate "In Progress" table
-    into the Workers table). Read from there so idle workers -- which never
-    appeared in 'active' anyway -- still round-trip harmlessly as all-None.
-    """
-    for attempt in (1, 2):
-        try:
-            resp = _mr_opener.open(f'{MR_BASE_URL}/api/data', timeout=5)
-            payload = json.loads(resp.read())
-            if 'error' in payload:
-                raise PermissionError('not authed')
-            progress = {}
-            for w in payload.get('workers', []):
-                progress[w['name']] = {
-                    'pct':          w.get('pct'),
-                    'estimated':    w.get('estimated'),
-                    'eta_s':        w.get('eta_s'),
-                    'eta_display':  format_eta(w.get('eta_s')),
-                    'stale_s':      w.get('stale_s'),
-                }
-            return progress
-        except (urllib.error.URLError, PermissionError, json.JSONDecodeError, OSError):
-            if attempt == 1:
-                try:
-                    _mr_login()
-                    continue
-                except (urllib.error.URLError, OSError):
-                    return {}
-            return {}
-    return {}
-
 
 def timeago(ts):
     if not ts:
@@ -583,90 +423,6 @@ def get_backup_run_detail(run_id):
         'dry_run':    bool(d.get('dry_run')),
         'steps':      steps,
     }
-
-
-def _mr_utc_to_local(ts):
-    """media-resize's state.db stores started_at via sqlite's datetime('now'), which
-    is UTC -- timeago() (below) assumes a naive *local* timestamp, matching every
-    other source it's fed (mtime-based last_run, _systemd_active_since, etc. are
-    all already local). Converting here, at the one mismatched source, keeps
-    timeago() itself correct for everything else instead of special-casing it."""
-    try:
-        return (datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
-                .replace(tzinfo=timezone.utc)
-                .astimezone()
-                .strftime('%Y-%m-%d %H:%M:%S'))
-    except (ValueError, TypeError):
-        return ts
-
-
-def get_media_resize_status():
-    result = {
-        'reachable': False,
-        'workers': [],
-        'queue_count': 0,
-        'done_count': 0,
-        'failed_count': 0,
-        'saved_gb': 0.0,
-        'saved_pct': 0.0,
-    }
-    try:
-        con = sqlite3.connect(MR_DB_PATH, timeout=5)
-        con.row_factory = sqlite3.Row
-        active_rows = con.execute(
-            "SELECT path, status, worker, host, started_at FROM files "
-            "WHERE status IN ('claimed','encoding','syncing','syncing_back') "
-            "ORDER BY started_at"
-        ).fetchall()
-        queue_count = con.execute("SELECT COUNT(*) c FROM files WHERE status='queued'").fetchone()['c']
-        done_count = con.execute("SELECT COUNT(*) c FROM files WHERE status='done'").fetchone()['c']
-        failed_count = con.execute("SELECT COUNT(*) c FROM files WHERE status='fail'").fetchone()['c']
-        totals = con.execute(
-            "SELECT COALESCE(SUM(size_in - size_out), 0) saved, COALESCE(SUM(size_in), 0) total_in "
-            "FROM files WHERE status='done'"
-        ).fetchone()
-        con.close()
-
-        result['reachable'] = True
-        result['queue_count'] = queue_count
-        result['done_count'] = done_count
-        result['failed_count'] = failed_count
-        saved, total_in = totals['saved'] or 0, totals['total_in'] or 0
-        result['saved_gb'] = round(saved / (1024 ** 3), 1)
-        result['saved_pct'] = round((saved / total_in * 100) if total_in else 0.0, 1)
-    except (sqlite3.Error, OSError):
-        return result
-
-    active_by_worker = {
-        r['worker']: {
-            'filename':   display_name(os.path.basename(r['path'])),
-            'status':     r['status'],
-            'started_at': _mr_utc_to_local(r['started_at']) if r['started_at'] else '',
-        } for r in active_rows if r['worker']
-    }
-
-    progress_by_worker = get_media_resize_progress()
-
-    try:
-        with open(MR_WORKERS_PATH, 'r') as f:
-            workers = json.load(f)
-        result['workers'] = [{
-            'name':          w['name'],
-            'display':       w.get('display', w['name']),
-            'enabled':       w.get('enabled', True),
-            'busy':          w['name'] in active_by_worker,
-            'current_file':  active_by_worker.get(w['name'], {}).get('filename'),
-            'current_status': active_by_worker.get(w['name'], {}).get('status'),
-            'started_at':    active_by_worker.get(w['name'], {}).get('started_at'),
-            'pct':           progress_by_worker.get(w['name'], {}).get('pct'),
-            'estimated':     progress_by_worker.get(w['name'], {}).get('estimated'),
-            'eta_display':   progress_by_worker.get(w['name'], {}).get('eta_display'),
-            'stale_s':       progress_by_worker.get(w['name'], {}).get('stale_s'),
-        } for w in workers]
-    except (OSError, json.JSONDecodeError, KeyError):
-        pass
-
-    return result
 
 
 JOB_LOG_LINE_RE = re.compile(r'^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\]?(?:\s+(\w+)(?: [^\s:]+)?:)?\s*(.*)$')
@@ -1488,9 +1244,13 @@ def build_dashboard():
     return {
         'bluesky_followers': get_bluesky_followers(),
         'site_traffic': get_site_traffic(),
+    }
+
+
+def build_system():
+    return {
         'security': get_security_findings(),
         'backups':  get_backup_runs(),
-        'media_resize': get_media_resize_status(),
         'cron_jobs': get_cron_jobs() + get_systemd_timers() + get_cc_routines(),
         'processes': get_running_processes(),
     }
@@ -1676,6 +1436,20 @@ def api_data():
     return jsonify(build_dashboard())
 
 
+@app.route('/system')
+def system_page():
+    if not authed():
+        return redirect(url_for('login'))
+    return render_template('system.html', **build_system(), timeago=timeago)
+
+
+@app.route('/api/system-data')
+def api_system_data():
+    if not authed():
+        return jsonify({'error': 'forbidden'}), 403
+    return jsonify(build_system())
+
+
 @app.route('/projects')
 def projects_page():
     if not authed():
@@ -1766,14 +1540,6 @@ def api_projects_move_todo(todo_id):
     data = request.get_json(force=True, silent=True) or {}
     move_project_todo(todo_id, before_id=data.get('before_id'))
     return jsonify({'ok': True})
-
-
-@app.route('/media-resize/toggle/<name>', methods=['POST'])
-def media_resize_toggle(name):
-    if not authed():
-        return redirect(url_for('login'))
-    mr_toggle_worker(name)
-    return redirect(url_for('index'))
 
 
 @app.route('/site-traffic')

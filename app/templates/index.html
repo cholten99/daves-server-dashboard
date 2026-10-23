@@ -80,6 +80,7 @@
         <button class="nav-dropdown-toggle" type="button">Links &#9662;</button>
         <div class="nav-dropdown-menu">
           <a href="/">Dashboard</a>
+          <a href="/system">System</a>
           <a href="/projects">Projects board</a>
           <a href="/backups">Backups</a>
           <a href="https://media-resize.bowsy.co.uk" target="_blank">Media Resize board</a>
@@ -132,174 +133,7 @@
     </div>
   </section>
 
-  <!-- ── Security audit ── -->
-  <section>
-    <h2 class="collapsible">Security audit (last {{ security|length }} run{{ 's' if security|length != 1 else '' }})<span class="chevron">▾</span></h2>
-    <div id="security-content">
-      {% if security %}
-      <table>
-        <tr><th>Run</th><th>Status</th><th>Findings</th></tr>
-        {% for run in security %}
-        <tr>
-          <td class="dim"><a href="/security/{{ run.when | urlencode }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.when }}</a></td>
-          <td>
-            {% if not run.issues %}
-              <span class="badge badge-ok">Clean</span>
-            {% elif run.max_severity == 'CRITICAL' %}
-              <span class="badge badge-critical">Critical</span>
-            {% elif run.max_severity == 'HIGH' %}
-              <span class="badge badge-high">High</span>
-            {% else %}
-              <span class="badge badge-medium">Medium</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if run.issues %}
-            <span class="dim">{{ run.issues|length }} finding{{ 's' if run.issues|length != 1 else '' }}</span>
-            {% else %}
-            <span class="dim">No issues found.</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <p class="empty">No audit runs found in this window.</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <!-- ── Backups ── -->
-  <section>
-    <h2 class="collapsible">Backups (last {{ backups|length }} run{{ 's' if backups|length != 1 else '' }})<span class="chevron">▾</span></h2>
-    <div id="backups-content">
-      {% if backups %}
-      <table>
-        <tr><th>Run</th><th>Status</th><th>Duration</th><th>Actions</th><th>Issues</th></tr>
-        {% for run in backups %}
-        <tr>
-          <td class="dim"><a href="/backup/{{ run.run_id }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.started_at[:16] | replace('T', ' ') }}</a></td>
-          <td>
-            {% if run.run_type == 'dry_run' %}<span class="badge badge-warning">Dry run</span>
-            {% elif run.run_type == 'test' %}<span class="badge badge-active">Test run</span>
-            {% endif %}
-          </td>
-          <td class="dim">{{ run.duration_display }}</td>
-          <td class="dim">{{ run.success }}/{{ run.total }}</td>
-          <td>
-            {% if run.failed %}<span class="badge fail" title="{{ run.failed_names|join(', ') }}">{{ run.failed }} failed</span>{% endif %}
-            {% if run.warning %}<span class="badge badge-warning" title="{{ run.warning_names|join(', ') }}">{{ run.warning }} warning</span>{% endif %}
-            {% if not run.failed and not run.warning %}<span class="badge badge-ok">OK</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <p class="empty">No backup runs found in this window.</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <!-- ── Media Resize ── -->
-  <section>
-    <h2 class="collapsible"><a href="https://media-resize.bowsy.co.uk" target="_blank" style="color:inherit;text-decoration:none">Media Resize</a><span class="chevron">▾</span></h2>
-    <div id="mr-content">
-      {% if media_resize.reachable %}
-      <table id="mr-workers-table">
-        <tr><th>Worker</th><th>Status</th><th>Current file</th><th>Progress</th><th>ETA</th><th>Since</th><th></th></tr>
-        {% for w in media_resize.workers %}
-        <tr data-worker="{{ w.name }}">
-          <td><strong>{{ w.display }}</strong></td>
-          <td>
-            {% if not w.enabled %}<span class="badge badge-off">Disabled</span>
-            {% elif w.busy %}<span class="badge badge-active">{{ w.current_status }}</span>
-            {% else %}<span class="badge badge-ok">Idle</span>{% endif %}
-          </td>
-          <td class="file">{{ w.current_file or '—' }}</td>
-          <td class="dim">
-            {% if w.pct is not none %}{% if w.estimated %}~{% endif %}{{ w.pct }}%{% if w.stale_s %}<span class="stale-warn" title="No live connection to the worker recently — showing last known progress">⚠</span>{% endif %}
-            {% else %}—{% endif %}
-          </td>
-          <td class="dim">{{ w.eta_display or '—' }}</td>
-          <td class="dim">{{ timeago(w.started_at) if w.busy else '—' }}</td>
-          <td>
-            <form method="post" action="/media-resize/toggle/{{ w.name }}" style="display:inline">
-              <button class="toggle" type="submit">{{ 'Enable' if not w.enabled else 'Disable' }}</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-
-      <div class="total-box" style="margin-top:1rem">
-        <span id="mr-saved-gb">{{ media_resize.saved_gb }}</span> GB
-        <span>saved across <span id="mr-done-count">{{ media_resize.done_count }}</span> files
-        &middot; <span id="mr-queue-count">{{ media_resize.queue_count }}</span> queued
-        &middot; <span id="mr-failed-count">{{ media_resize.failed_count }}</span> failed</span>
-      </div>
-      {% else %}
-      <p class="empty">Could not read media-resize state.</p>
-      {% endif %}
-    </div>
-  </section>
-
-  <!-- ── Cron Jobs ── -->
-  <section>
-    <h2 class="collapsible">Scheduled Jobs<span class="chevron">▾</span></h2>
-    <div id="jobs-content">
-      <table>
-        <tr><th>Job</th><th>Type</th><th>Schedule</th><th>Last run</th><th>Status</th></tr>
-        {% for c in cron_jobs %}
-        <tr>
-          <td class="file" title="{{ c.command }}">{% if c.link %}<a href="{{ c.link }}" target="_blank" style="color:#9cf;text-decoration:none">{{ c.description }}</a>{% else %}{{ c.description }}{% endif %}</td>
-          <td class="dim">{{ c.type }}</td>
-          <td class="dim" title="{{ c.schedule }}">{{ c.schedule_human }}</td>
-          <td class="dim">{{ timeago(c.last_run) if c.last_run else '—' }}</td>
-          <td>
-            {% if c.status == 'ok' %}<span class="badge badge-ok" title="{{ c.message }}">OK</span>
-            {% elif c.status == 'warning' %}<span class="badge badge-warning" title="{{ c.message }}">{{ c.message }}</span>
-            {% elif c.status == 'fail' %}<span class="badge fail" title="{{ c.message }}">Failed</span>
-            {% elif c.status == 'see_above' %}<span class="badge badge-off" title="{{ c.message }}">See above</span>
-            {% elif c.status == 'skipped' %}<span class="badge badge-off" title="{{ c.message }}">Skipped</span>
-            {% else %}<span class="badge badge-off" title="{{ c.message }}">Unknown</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-    </div>
-  </section>
-
-  <section>
-    <h2 class="collapsible">Always-on Processes<span class="chevron">▾</span></h2>
-    <div id="processes-content">
-      <table>
-        <tr><th>Process</th><th>Status</th><th>Running since</th></tr>
-        {% for p in processes %}
-        <tr>
-          <td class="file">{% if p.link %}<a href="{{ p.link }}" target="_blank" style="color:#9cf;text-decoration:none">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</td>
-          <td>
-            {% if p.running %}<span class="badge badge-ok">Running</span>
-            {% else %}<span class="badge fail">Stopped</span>{% endif %}
-          </td>
-          <td class="dim">{{ timeago(p.since) if p.since else '—' }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-    </div>
-  </section>
-
 <script>
-function tableHtml(headers, rows) {
-  const head = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
-  const body = rows.map(r => `<tr>${r}</tr>`).join('');
-  return `<table>${head}${body}</table>`;
-}
-function severityBadge(sev, hasIssues) {
-  if (!hasIssues) return '<span class="badge badge-ok">Clean</span>';
-  if (sev === 'CRITICAL') return '<span class="badge badge-critical">Critical</span>';
-  if (sev === 'HIGH') return '<span class="badge badge-high">High</span>';
-  return '<span class="badge badge-medium">Medium</span>';
-}
 function updateSiteTraffic(traffic) {
   const el = document.getElementById('traffic-content');
   if (!traffic.length) { el.innerHTML = '<p class="empty">No sites configured.</p>'; return; }
@@ -313,98 +147,11 @@ function updateSiteTraffic(traffic) {
     + row('Cloudflare &middot; Weekly', 'page_weekly')
     + '</table>';
 }
-function updateSecurity(security) {
-  const el = document.getElementById('security-content');
-  if (!security.length) { el.innerHTML = '<p class="empty">No audit runs found in this window.</p>'; return; }
-  const rows = security.map(run => {
-    const findings = run.issues.length
-      ? `<span class="dim">${run.issues.length} finding${run.issues.length !== 1 ? 's' : ''}</span>`
-      : '<span class="dim">No issues found.</span>';
-    const link = `<a href="/security/${encodeURIComponent(run.when)}" target="_blank" style="color:#9cf;text-decoration:none">${run.when}</a>`;
-    return `<td class="dim">${link}</td><td>${severityBadge(run.max_severity, run.issues.length > 0)}</td><td>${findings}</td>`;
-  });
-  el.innerHTML = tableHtml(['Run', 'Status', 'Findings'], rows);
-}
-function updateBackups(backups) {
-  const el = document.getElementById('backups-content');
-  if (!backups.length) { el.innerHTML = '<p class="empty">No backup runs found in this window.</p>'; return; }
-  const rows = backups.map(run => {
-    const dur = run.duration_display;
-    let issues = '';
-    if (run.failed) issues += `<span class="badge fail" title="${run.failed_names.join(', ')}">${run.failed} failed</span>`;
-    if (run.warning) issues += `<span class="badge badge-warning" title="${run.warning_names.join(', ')}">${run.warning} warning</span>`;
-    if (!run.failed && !run.warning) issues = '<span class="badge badge-ok">OK</span>';
-    const label = run.started_at.slice(0, 16).replace('T', ' ');
-    const link = `<a href="/backup/${run.run_id}" target="_blank" style="color:#9cf;text-decoration:none">${label}</a>`;
-    const status = run.run_type === 'dry_run' ? '<span class="badge badge-warning">Dry run</span>'
-      : run.run_type === 'test' ? '<span class="badge badge-active">Test run</span>'
-      : '';
-    return `<td class="dim">${link}</td><td>${status}</td><td class="dim">${dur}</td><td class="dim">${run.success}/${run.total}</td><td>${issues}</td>`;
-  });
-  el.innerHTML = tableHtml(['Run', 'Status', 'Duration', 'Actions', 'Issues'], rows);
-}
-function timeAgo(ts) {
-  if (!ts) return '';
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-  const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
-  return m ? `${h}h ${m}m ago` : `${h}h ago`;
-}
-function updateMediaResize(mr) {
-  const el = document.getElementById('mr-content');
-  if (!mr.reachable) { el.innerHTML = '<p class="empty">Could not read media-resize state.</p>'; return; }
-  const workerRows = mr.workers.map(w => {
-    const status = !w.enabled ? '<span class="badge badge-off">Disabled</span>'
-      : w.busy ? `<span class="badge badge-active">${w.current_status}</span>`
-      : '<span class="badge badge-ok">Idle</span>';
-    const since = w.busy ? timeAgo(w.started_at) : '—';
-    const staleWarn = w.stale_s ? '<span class="stale-warn" title="No live connection to the worker recently — showing last known progress">⚠</span>' : '';
-    const progress = w.pct !== null && w.pct !== undefined ? `${w.estimated ? '~' : ''}${w.pct}%${staleWarn}` : '—';
-    const eta = w.eta_display || '—';
-    const toggleBtn = `<form method="post" action="/media-resize/toggle/${w.name}" style="display:inline"><button class="toggle" type="submit">${w.enabled ? 'Disable' : 'Enable'}</button></form>`;
-    return `<td><strong>${w.display}</strong></td><td>${status}</td><td class="file">${w.current_file || '—'}</td><td class="dim">${progress}</td><td class="dim">${eta}</td><td class="dim">${since}</td><td>${toggleBtn}</td>`;
-  });
-  el.innerHTML = tableHtml(['Worker', 'Status', 'Current file', 'Progress', 'ETA', 'Since', ''], workerRows)
-    + `<div class="total-box" style="margin-top:1rem"><span>${mr.saved_gb}</span> GB
-       <span>saved across ${mr.done_count} files &middot; ${mr.queue_count} queued &middot; ${mr.failed_count} failed</span></div>`;
-}
-function updateJobs(jobs) {
-  const el = document.getElementById('jobs-content');
-  const rows = jobs.map(c => {
-    const since = c.last_run ? timeAgo(c.last_run) : '—';
-    const status = c.status === 'ok' ? `<span class="badge badge-ok" title="${c.message}">OK</span>`
-      : c.status === 'warning' ? `<span class="badge badge-warning" title="${c.message}">${c.message}</span>`
-      : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
-      : c.status === 'see_above' ? `<span class="badge badge-off" title="${c.message}">See above</span>`
-      : c.status === 'skipped' ? `<span class="badge badge-off" title="${c.message}">Skipped</span>`
-      : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
-    const name = c.link ? `<a href="${c.link}" target="_blank" style="color:#9cf;text-decoration:none">${c.description}</a>` : c.description;
-    return `<td class="file" title="${c.command}">${name}</td><td class="dim">${c.type}</td><td class="dim" title="${c.schedule}">${c.schedule_human}</td><td class="dim">${since}</td><td>${status}</td>`;
-  });
-  el.innerHTML = tableHtml(['Job', 'Type', 'Schedule', 'Last run', 'Status'], rows);
-}
-function updateProcesses(processes) {
-  const el = document.getElementById('processes-content');
-  if (!processes.length) { el.innerHTML = '<p class="empty">No processes configured.</p>'; return; }
-  const rows = processes.map(p => {
-    const name = p.link ? `<a href="${p.link}" target="_blank" style="color:#9cf;text-decoration:none">${p.name}</a>` : p.name;
-    const status = p.running ? '<span class="badge badge-ok">Running</span>' : '<span class="badge fail">Stopped</span>';
-    const since = p.since ? timeAgo(p.since) : '—';
-    return `<td class="file">${name}</td><td>${status}</td><td class="dim">${since}</td>`;
-  });
-  el.innerHTML = tableHtml(['Process', 'Status', 'Running since'], rows);
-}
 function poll() {
   fetch('/api/data')
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(data => {
       updateSiteTraffic(data.site_traffic);
-      updateSecurity(data.security);
-      updateBackups(data.backups);
-      updateMediaResize(data.media_resize);
-      updateJobs(data.cron_jobs);
-      updateProcesses(data.processes);
       document.getElementById('pulse').classList.add('live');
     })
     .catch(() => {
@@ -416,7 +163,7 @@ document.getElementById('pulse').classList.add('live');
 
 document.querySelectorAll('h2.collapsible').forEach(h2 => {
   h2.addEventListener('click', (e) => {
-    if (e.target.closest('a')) return; // let Site Traffic / Media Resize links navigate, don't also toggle
+    if (e.target.closest('a')) return; // let header links (e.g. Site Traffic) navigate, don't also toggle
     h2.closest('section').classList.toggle('collapsed');
   });
 });
