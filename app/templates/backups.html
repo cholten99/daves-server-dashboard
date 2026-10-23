@@ -21,6 +21,28 @@
     }
     button.go { background: #2a4a6a; border-color: #3a6a9a; cursor: pointer; padding: .45rem 1.2rem; flex: 0 0 auto; }
     button.go:hover { background: #335a80; }
+    /* Backup run history -- same look as the System page's sections. */
+    h2 { font-size: .85rem; color: #ddd; text-transform: uppercase; letter-spacing: .08em; margin-bottom: .75rem; }
+    section { margin: 2.5rem 0; }
+    h2.collapsible {
+      cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between;
+      background: #242424; padding: .5rem .75rem; border-radius: 6px;
+    }
+    h2.collapsible:hover { background: #2a2a2a; }
+    h2.collapsible .chevron { font-size: .7rem; color: #888; transition: transform .15s ease; margin-left: .75rem; }
+    section.collapsed h2.collapsible .chevron { transform: rotate(-90deg); }
+    section.collapsed > *:not(h2) { display: none; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; background: #272727; border-radius: 6px; overflow: hidden; }
+    th { text-align: left; color: #ddd; font-weight: 500; padding: .5rem .75rem; border-bottom: 1px solid #333; background: #242424; }
+    td { padding: .5rem .75rem; border-bottom: 1px solid #2e2e2e; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: .15rem .5rem; border-radius: 3px; font-size: .78rem; font-weight: 600; }
+    .badge-ok       { background: #1a3a1a; color: #6d6; }
+    .badge-active   { background: #1a2a3e; color: #69c; }
+    .badge.fail     { background: #3a1a1a; color: #e55; }
+    .badge-warning  { background: #2a2a1a; color: #ca6; }
+    .dim   { color: #ddd; font-size: .85rem; }
+    .empty { color: #ddd; font-size: .9rem; padding: .5rem 0; }
   </style>
   {{ nav.css() }}
 </head>
@@ -47,6 +69,37 @@
   <p class="sub">No backup items have history yet.</p>
   {% endif %}
 
+  <!-- ── Backups ── -->
+  <section>
+    <h2 class="collapsible">Backups (last {{ backups|length }} run{{ 's' if backups|length != 1 else '' }})<span class="chevron">▾</span></h2>
+    <div id="backups-content">
+      {% if backups %}
+      <table>
+        <tr><th>Run</th><th>Status</th><th>Duration</th><th>Actions</th><th>Issues</th></tr>
+        {% for run in backups %}
+        <tr>
+          <td class="dim"><a href="/backup/{{ run.run_id }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.started_at[:16] | replace('T', ' ') }}</a></td>
+          <td>
+            {% if run.run_type == 'dry_run' %}<span class="badge badge-warning">Dry run</span>
+            {% elif run.run_type == 'test' %}<span class="badge badge-active">Test run</span>
+            {% endif %}
+          </td>
+          <td class="dim">{{ run.duration_display }}</td>
+          <td class="dim">{{ run.success }}/{{ run.total }}</td>
+          <td>
+            {% if run.failed %}<span class="badge fail" title="{{ run.failed_names|join(', ') }}">{{ run.failed }} failed</span>{% endif %}
+            {% if run.warning %}<span class="badge badge-warning" title="{{ run.warning_names|join(', ') }}">{{ run.warning }} warning</span>{% endif %}
+            {% if not run.failed and not run.warning %}<span class="badge badge-ok">OK</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No backup runs found in this window.</p>
+      {% endif %}
+    </div>
+  </section>
+
 <script>
 const NIGHTS = {{ items | tojson }}.reduce((m, it) => (m[it.slug] = it.nights, m), {});
 const item = document.getElementById('item'), night = document.getElementById('night');
@@ -64,6 +117,9 @@ if (item) {
     location.href = `/backups/browse/${encodeURIComponent(item.value)}/${encodeURIComponent(night.value)}/`;
   });
 }
+document.querySelectorAll('h2.collapsible').forEach(h2 => {
+  h2.addEventListener('click', () => h2.closest('section').classList.toggle('collapsed'));
+});
 </script>
 {{ nav.js() }}
 </body>

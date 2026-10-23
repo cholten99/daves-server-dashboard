@@ -646,16 +646,18 @@ def _cron_schedule_human(schedule):
 # without a 'LEVEL:'/'LEVEL extra:' prefix, ISO-8601 'T' separators) and
 # falls back to the log file's own mtime if no line has a parseable
 # timestamp at all -- so the only two log_path values that don't resolve to
-# a real ok/fail are security-audit.sh and backup.py, which use the
-# SEE_ABOVE sentinel instead of None: another dashboard section (Security
-# audit, Backups) already covers their status in more detail than a one-line
-# badge could, so get_cron_jobs() reports them as 'see_above' rather than
-# 'unknown' -- unknown is reserved for a job that's genuinely unaccounted for.
+# a real ok/fail are security-audit.sh and backup.py, which use a sentinel
+# instead of None: another section already covers their status in more
+# detail than a one-line badge could -- Security audit just above on the
+# System page (SEE_ABOVE -> 'see_above'), backup runs on the Backups page
+# (SEE_BACKUPS_PAGE -> 'see_backups', a link there) -- rather than 'unknown',
+# which is reserved for a job that's genuinely unaccounted for.
 SEE_ABOVE = 'SEE_ABOVE'
+SEE_BACKUPS_PAGE = 'SEE_BACKUPS_PAGE'
 CRON_JOB_INFO = [
     # needle,                       description,                                                     log path
     ('security-audit.sh',          'Security audit scan',                                            SEE_ABOVE),
-    ('backup.py',                  'Server backup run',                                               SEE_ABOVE),
+    ('backup.py',                  'Server backup run',                                               SEE_BACKUPS_PAGE),
     ('fetch-latest-post.py',       'Fetch latest Bowsy blog post',                                    BOWSY_FEED_LOG),
     ('site-traffic/pull_daily.py', 'Pull site traffic stats (Search Console + Cloudflare)',           '/var/www/site-traffic/logs/pull.log'),
     ('unofficial-andy/main.py',    "Cross-post TikTok/Instagram to Bluesky ('Unofficial Andy')",      '/home/dave/projects/unofficial-andy/logs/cron.log'),
@@ -714,7 +716,9 @@ def get_cron_jobs():
             schedule, command = ' '.join(parts[:5]), parts[5]
         description, log_path = _cron_job_info(command)
         if log_path == SEE_ABOVE:
-            status = {'last_run': None, 'status': 'see_above', 'message': 'Covered above (Security audit / Backups)'}
+            status = {'last_run': None, 'status': 'see_above', 'message': 'Covered above (Security audit)'}
+        elif log_path == SEE_BACKUPS_PAGE:
+            status = {'last_run': None, 'status': 'see_backups', 'message': 'Run history is on the Backups page'}
         else:
             status = (log_path and _last_job_status(log_path)) or \
                 {'last_run': None, 'status': 'unknown', 'message': 'No log entries found'}
@@ -1250,7 +1254,6 @@ def build_dashboard():
 def build_system():
     return {
         'security': get_security_findings(),
-        'backups':  get_backup_runs(),
         'cron_jobs': get_cron_jobs() + get_systemd_timers() + get_cc_routines(),
         'processes': get_running_processes(),
     }
@@ -1590,7 +1593,7 @@ def backups_page():
     items = [{'slug': s, 'name': backup_item_label(a['name']), 'nights': _backup_night_options(a)}
              for s, a in backup_items()]
     items.sort(key=lambda it: it['name'].lower())
-    return render_template('backups.html', items=items)
+    return render_template('backups.html', items=items, backups=get_backup_runs())
 
 
 @app.route('/backups/browse/<slug>/<night>/', defaults={'rel': ''})

@@ -98,37 +98,6 @@
     </div>
   </section>
 
-  <!-- ── Backups ── -->
-  <section>
-    <h2 class="collapsible">Backups (last {{ backups|length }} run{{ 's' if backups|length != 1 else '' }})<span class="chevron">▾</span></h2>
-    <div id="backups-content">
-      {% if backups %}
-      <table>
-        <tr><th>Run</th><th>Status</th><th>Duration</th><th>Actions</th><th>Issues</th></tr>
-        {% for run in backups %}
-        <tr>
-          <td class="dim"><a href="/backup/{{ run.run_id }}" target="_blank" style="color:#9cf;text-decoration:none">{{ run.started_at[:16] | replace('T', ' ') }}</a></td>
-          <td>
-            {% if run.run_type == 'dry_run' %}<span class="badge badge-warning">Dry run</span>
-            {% elif run.run_type == 'test' %}<span class="badge badge-active">Test run</span>
-            {% endif %}
-          </td>
-          <td class="dim">{{ run.duration_display }}</td>
-          <td class="dim">{{ run.success }}/{{ run.total }}</td>
-          <td>
-            {% if run.failed %}<span class="badge fail" title="{{ run.failed_names|join(', ') }}">{{ run.failed }} failed</span>{% endif %}
-            {% if run.warning %}<span class="badge badge-warning" title="{{ run.warning_names|join(', ') }}">{{ run.warning }} warning</span>{% endif %}
-            {% if not run.failed and not run.warning %}<span class="badge badge-ok">OK</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <p class="empty">No backup runs found in this window.</p>
-      {% endif %}
-    </div>
-  </section>
-
   <!-- ── Scheduled Jobs ── -->
   <section>
     <h2 class="collapsible">Scheduled Jobs<span class="chevron">▾</span></h2>
@@ -146,6 +115,7 @@
             {% elif c.status == 'warning' %}<span class="badge badge-warning" title="{{ c.message }}">{{ c.message }}</span>
             {% elif c.status == 'fail' %}<span class="badge fail" title="{{ c.message }}">Failed</span>
             {% elif c.status == 'see_above' %}<span class="badge badge-off" title="{{ c.message }}">See above</span>
+            {% elif c.status == 'see_backups' %}<a href="/backups" class="badge badge-off" title="{{ c.message }}" style="text-decoration:none">See Backups</a>
             {% elif c.status == 'skipped' %}<span class="badge badge-off" title="{{ c.message }}">Skipped</span>
             {% else %}<span class="badge badge-off" title="{{ c.message }}">Unknown</span>{% endif %}
           </td>
@@ -199,24 +169,6 @@ function updateSecurity(security) {
   });
   el.innerHTML = tableHtml(['Run', 'Status', 'Findings'], rows);
 }
-function updateBackups(backups) {
-  const el = document.getElementById('backups-content');
-  if (!backups.length) { el.innerHTML = '<p class="empty">No backup runs found in this window.</p>'; return; }
-  const rows = backups.map(run => {
-    const dur = run.duration_display;
-    let issues = '';
-    if (run.failed) issues += `<span class="badge fail" title="${run.failed_names.join(', ')}">${run.failed} failed</span>`;
-    if (run.warning) issues += `<span class="badge badge-warning" title="${run.warning_names.join(', ')}">${run.warning} warning</span>`;
-    if (!run.failed && !run.warning) issues = '<span class="badge badge-ok">OK</span>';
-    const label = run.started_at.slice(0, 16).replace('T', ' ');
-    const link = `<a href="/backup/${run.run_id}" target="_blank" style="color:#9cf;text-decoration:none">${label}</a>`;
-    const status = run.run_type === 'dry_run' ? '<span class="badge badge-warning">Dry run</span>'
-      : run.run_type === 'test' ? '<span class="badge badge-active">Test run</span>'
-      : '';
-    return `<td class="dim">${link}</td><td>${status}</td><td class="dim">${dur}</td><td class="dim">${run.success}/${run.total}</td><td>${issues}</td>`;
-  });
-  el.innerHTML = tableHtml(['Run', 'Status', 'Duration', 'Actions', 'Issues'], rows);
-}
 function timeAgo(ts) {
   if (!ts) return '';
   const diff = (Date.now() - new Date(ts).getTime()) / 1000;
@@ -233,6 +185,7 @@ function updateJobs(jobs) {
       : c.status === 'warning' ? `<span class="badge badge-warning" title="${c.message}">${c.message}</span>`
       : c.status === 'fail' ? `<span class="badge fail" title="${c.message}">Failed</span>`
       : c.status === 'see_above' ? `<span class="badge badge-off" title="${c.message}">See above</span>`
+      : c.status === 'see_backups' ? `<a href="/backups" class="badge badge-off" title="${c.message}" style="text-decoration:none">See Backups</a>`
       : c.status === 'skipped' ? `<span class="badge badge-off" title="${c.message}">Skipped</span>`
       : `<span class="badge badge-off" title="${c.message}">Unknown</span>`;
     const name = c.link ? `<a href="${c.link}" target="_blank" style="color:#9cf;text-decoration:none">${c.description}</a>` : c.description;
@@ -256,7 +209,6 @@ function poll() {
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(data => {
       updateSecurity(data.security);
-      updateBackups(data.backups);
       updateJobs(data.cron_jobs);
       updateProcesses(data.processes);
       document.getElementById('pulse').classList.add('live');
