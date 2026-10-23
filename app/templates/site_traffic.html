@@ -1,3 +1,4 @@
+{% import '_nav.html' as nav %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -34,8 +35,10 @@
     section.collapsed h2.collapsible { margin-bottom: 0; }
     section.collapsed > *:not(h2) { display: none; }
   </style>
+  {{ nav.css() }}
 </head>
 <body>
+  {{ nav.menu() }}
   <h1>Site Traffic</h1>
   <p class="sub">Daily search &amp; page hits per site, last 7 days</p>
 
@@ -100,5 +103,6 @@ document.querySelectorAll('h2.collapsible').forEach(h2 => {
   });
 });
 </script>
+{{ nav.js() }}
 </body>
 </html>

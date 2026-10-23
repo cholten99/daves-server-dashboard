@@ -1,3 +1,4 @@
+{% import '_nav.html' as nav %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -21,8 +22,10 @@
     a.back { color: #69c; text-decoration: none; font-size: .85rem; }
     a.back:hover { color: #9cf; }
   </style>
+  {{ nav.css() }}
 </head>
 <body>
+  {{ nav.menu() }}
   {% if not_found %}
   <h1>Security audit — {{ when }}</h1>
   <p class="sub">This run's findings are no longer available — past the retention window covered by this dashboard.</p>
@@ -51,5 +54,6 @@
   {% endif %}
 
   <p style="margin-top:1.5rem"><a class="back" href="javascript:window.close()">Close this tab</a></p>
+{{ nav.js() }}
 </body>
 </html>
