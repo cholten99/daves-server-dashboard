@@ -5,7 +5,13 @@
       {{ nav.menu() }}       in the header (menu(live=True) on pages that poll
                              and drive the #pulse live-updates dot)
       {{ nav.js() }}         before </body>
-    Add or remove menu links only in menu() below. -#}
+    Add or remove menu links only in menu() below.
+    Pages also call {{ nav.favicon('<emoji>') }} in <head> -- one emoji per
+    section, so tabs for the different pages are easy to tell apart. -#}
+
+{% macro favicon(emoji) -%}
+  <link rel="icon" href="data:image/svg+xml,{{ ('<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><text y=\'.9em\' font-size=\'90\'>' ~ emoji ~ '</text></svg>') | urlencode }}">
+{%- endmacro %}
 
 {% macro css() -%}
   <style>
